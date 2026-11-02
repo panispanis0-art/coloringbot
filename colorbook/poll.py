@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 
 import requests
@@ -77,8 +78,8 @@ def send_buttons(cfg: Config, tg: TG, chat: int, theme: str | None) -> None:
         print("buttons failed:", e)
 
 
-def collect(cfg: Config, tg: TG) -> list[tuple[int, str | None]]:
-    updates = tg.call("getUpdates", data={"timeout": 0,
+def collect(cfg: Config, tg: TG, wait: int = 0) -> list[tuple[int, str | None]]:
+    updates = tg.call("getUpdates", timeout=wait + 30, data={"timeout": wait,
                                           "allowed_updates": json.dumps(["message", "callback_query"])})
     jobs: list[tuple[int, str | None]] = []
     for u in updates:
@@ -128,9 +129,33 @@ def run(cfg: Config) -> None:
         raise SystemExit("TELEGRAM_BOT_TOKEN secret is missing")
     tg = TG(cfg.bot_token)
     tg.call("deleteWebhook")
+    # Stay online and answer instantly (long polling) for LISTEN_MINUTES after the
+    # last message, instead of exiting and waiting for the next scheduled check.
+    listen = float(os.getenv("LISTEN_MINUTES", "0") or 0) * 60
+    started = time.time()
     jobs = collect(cfg, tg)
     print(f"{len(jobs)} book request(s)")
-    for chat, theme in jobs[:3]:  # at most 3 books per run
+    while True:
+        if jobs:
+            make_books(cfg, tg, jobs[:3])  # at most 3 books per batch
+            started = time.time()  # stay around a while after each book
+        left = listen - (time.time() - started)
+        if left < 5:
+            break
+        try:
+            jobs = collect(cfg, tg, wait=int(min(50, left)))
+        except Exception as e:
+            print("listen error:", e)
+            time.sleep(5)
+            jobs = []
+        if jobs:
+            print(f"{len(jobs)} new book request(s)")
+
+
+def make_books(cfg: Config, tg: TG, jobs) -> None:
+    from .bot import _split_pdfs
+    from .pipeline import make_book
+    for chat, theme in jobs:
         what = f"on “{theme}”" if theme else "with a fresh theme"
         status = tg.say(chat, f"Got it! Making a new book {what}. Thinking of ideas…")
         last = [0.0]

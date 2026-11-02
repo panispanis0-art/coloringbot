@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write            # to save theme history and the bot owner
+  actions: write             # to hand over to the next run (always-on mode)
 
 concurrency:
   group: coloring-book
@@ -24,7 +25,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,7 +43,10 @@ jobs:
           POLLINATIONS_KEY: ${{ secrets.POLLINATIONS_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          PARALLEL: "3"
+          PARALLEL: "5"
+          # Public repos have free, unlimited minutes: stay online ~5.5 h and answer
+          # instantly. Private repos: listen 20 min after each wake-up to save minutes.
+          LISTEN_MINUTES: ${{ github.event.repository.private && '20' || '330' }}
           PAGES: "5"
           SAMPLE: ${{ inputs.sample }}
           THEME: ${{ inputs.theme }}
@@ -59,3 +63,8 @@ jobs:
             git commit -m "Update bot state"
             git pull --rebase -q && git push -q
           fi
+      - name: Hand over to the next run (always-on, public repos only)
+        if: ${{ !github.event.repository.private && inputs.sample != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run coloring-book.yml --ref main || true
