@@ -14,7 +14,9 @@ from .config import Config
 
 
 SIMPLER = (" Make it much simpler: fewer, bigger shapes, thick bold outlines, "
-           "large empty areas to color, no tiny details, no shading, no black fills.")
+           "large empty areas to color, no tiny details, no shading, no black fills. "
+           "Every animal is a plain natural animal on all its own legs, with no clothes "
+           "and no human features.")
 
 
 def _slug(s: str) -> str:
@@ -43,6 +45,16 @@ def make_book(cfg: Config, request: str | None = None, log=print,
             raw = providers.generate(cfg, prompt)
             (folder / "pages" / f"{i:03d}_raw_{attempt}.img").write_bytes(raw)
             img, score, problems = handdrawn.process_scored(raw, seed=random.randint(0, 2**31))
+            if score >= 0.6:
+                import io
+                small = Image.open(io.BytesIO(raw)).convert("L")
+                small.thumbnail((512, 512))
+                buf = io.BytesIO()
+                small.save(buf, "PNG")
+                ok, why = providers.review_page(cfg, buf.getvalue(), page["scene"])
+                if not ok:
+                    score = 0.45  # below the bar: redraw, but still better than a broken page
+                    problems = problems + [f"looks wrong: {why}"]
             if best is None or score > best[1]:
                 best = (img, score, problems)
             if score >= 0.6 or budget[0] <= 0:

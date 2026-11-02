@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import io
 import random
 import threading
@@ -157,3 +158,47 @@ def generate(cfg: Config, prompt: str, retries: int = 3) -> bytes:
                 time.sleep(delay)
                 delay *= 2
     raise ImageError("; ".join(errors[-3:]) or "no image back-end available")
+
+
+VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
+_vision_state = {"agreed": False, "off": False}
+
+
+def review_page(cfg: Config, png: bytes, scene: str) -> tuple[bool, str]:
+    """Ask a free vision model whether the picture has a human-animal mix or a
+    deformed body. Returns (ok, reason). If the check is unavailable, the page passes."""
+    if _vision_state["off"] or not (cfg.cf_account and cfg.cf_token):
+        return True, ""
+    url = f"https://api.cloudflare.com/client/v4/accounts/{cfg.cf_account}/ai/run/{VISION_MODEL}"
+    head = {"Authorization": f"Bearer {cfg.cf_token}"}
+    question = (
+        "This is a children's coloring page meant to show: " + scene[:300] + "\n"
+        "Look closely at every character. Answer only with JSON: "
+        '{"hybrid": true/false, "deformed": true/false, "reason": "short"}. '
+        "hybrid = an animal with a human body or human parts (human hair, dress or clothes, "
+        "human hands or feet, shoes, walking or dancing upright like a person), or a person "
+        "with animal parts. deformed = extra or missing legs, arms, eyes or tails, merged or "
+        "broken bodies.")
+    body = {"messages": [{"role": "user", "content": question}],
+            "image": list(png), "max_tokens": 120}
+    for _ in range(2):
+        try:
+            r = requests.post(url, headers=head, json=body, timeout=120)
+            if r.status_code != 200 and "agree" in r.text.lower() and not _vision_state["agreed"]:
+                # Meta's model needs a one-time licence acceptance on the account.
+                requests.post(url, headers=head, json={"prompt": "agree"}, timeout=60)
+                _vision_state["agreed"] = True
+                continue
+            if r.status_code != 200:
+                print("vision check unavailable:", r.status_code, r.text[:200], flush=True)
+                _vision_state["off"] = True
+                return True, ""
+            text = r.json()["result"].get("response") or ""
+            low = text.lower().replace(" ", "")
+            bad = '"hybrid":true' in low or '"deformed":true' in low
+            m = re.search(r'"reason"\s*:\s*"([^"]*)"', text)
+            return (not bad), (m.group(1) if m else text[:80])
+        except Exception as e:  # network or JSON trouble: do not block the book
+            print("vision check error:", e, flush=True)
+            return True, ""
+    return True, ""
