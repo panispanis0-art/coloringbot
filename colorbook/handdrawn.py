@@ -67,21 +67,33 @@ def hollow_solids(ink: np.ndarray, line_px: int = 9) -> np.ndarray:
 
 
 def drop_frames(ink: np.ndarray) -> np.ndarray:
-    """Remove borders, vignettes and frames: ink touching the image edge, and thin
-    loops that enclose almost the whole picture (AI images often add these)."""
+    """Remove borders and frames: big components whose ink sits mostly in a band
+    along the image edge. Scenery that merely touches the edge (trees, grass) stays."""
     h, w = ink.shape
     n, labels, stats, _ = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8), 8)
+    band = np.zeros((h, w), bool)
+    bw_, bh_ = int(w * 0.06), int(h * 0.06)
+    band[:bh_, :] = band[-bh_:, :] = True
+    band[:, :bw_] = band[:, -bw_:] = True
     kill = np.zeros(n, bool)
-    m = 4
     for i in range(1, n):
         x, y, bw, bh, area = stats[i]
-        touches = x <= m or y <= m or x + bw >= w - m or y + bh >= h - m
-        huge = bw > 0.8 * w and bh > 0.75 * h
-        sparse = area < 0.12 * bw * bh
-        if (touches and (bw > 0.5 * w or bh > 0.5 * h)) or (huge and sparse and touches) \
-                or (huge and sparse and area < 0.03 * w * h):
-            kill[i] = True
+        if bw > 0.7 * w and bh > 0.7 * h:
+            comp = labels == i
+            if band[comp].mean() > 0.55:
+                kill[i] = True
     return np.where(kill[labels], 0, ink).astype(np.uint8)
+
+
+def colourfulness(data: bytes) -> float:
+    """Share of clearly coloured pixels (coloring pages should be black and white)."""
+    arr = np.frombuffer(data, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return 0.0
+    img = cv2.resize(img, (256, 256))
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    return float(((hsv[..., 1] > 70) & (hsv[..., 2] > 60)).mean())
 
 
 def drop_specks(ink: np.ndarray, min_frac: float = 0.00004) -> np.ndarray:
@@ -189,6 +201,10 @@ def process_scored(data: bytes, seed: int | None = None, brush: bool = True):
         ink = hand_inked(ink, seed=seed)
     ink = drop_specks(ink)
     score, problems = quality(gray, ink)
+    col = colourfulness(data)
+    if col > 0.03:  # the AI painted it in colour: redraw
+        score = min(score, 0.3)
+        problems = problems + ["coloured"]
     img = Image.fromarray(255 - ink).convert("1", dither=Image.Dither.NONE)
     return img, score, problems
 
