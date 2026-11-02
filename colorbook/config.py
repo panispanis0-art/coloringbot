@@ -20,6 +20,20 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _cf_parts() -> tuple[str, str]:
+    """Find the account id and API token even if the secrets were pasted with
+    extra lines, spaces or labels (e.g. both values in one box)."""
+    import re
+    acc_raw = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+    tok_raw = os.getenv("CLOUDFLARE_API_TOKEN", "")
+    words = lambda s: re.findall(r"[A-Za-z0-9_-]{20,}", s)
+    hexid = lambda w: re.fullmatch(r"[0-9a-f]{32}", w) is not None
+    acc = next((w for w in words(acc_raw) + words(tok_raw) if hexid(w)), acc_raw.strip())
+    toks = [w for w in words(tok_raw) if w != acc] or [w for w in words(acc_raw) if w != acc]
+    tok = next((w for w in toks if not hexid(w)), toks[0] if toks else "")
+    return acc, tok
+
+
 @dataclass
 class Config:
     bot_token: str = field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", "").strip())
@@ -29,8 +43,8 @@ class Config:
     openai_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", "").strip())
     gemini_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", "").strip())
     fal_key: str = field(default_factory=lambda: os.getenv("FAL_KEY", "").strip())
-    cf_account: str = field(default_factory=lambda: os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip())
-    cf_token: str = field(default_factory=lambda: os.getenv("CLOUDFLARE_API_TOKEN", "").strip())
+    cf_account: str = field(default_factory=lambda: _cf_parts()[0])
+    cf_token: str = field(default_factory=lambda: _cf_parts()[1])
     cf_image_model: str = field(default_factory=lambda: os.getenv("CLOUDFLARE_IMAGE_MODEL", "@cf/black-forest-labs/flux-1-schnell").strip())
     cf_text_model: str = field(default_factory=lambda: os.getenv("CLOUDFLARE_TEXT_MODEL", "@cf/meta/llama-3.1-8b-instruct-fast").strip())
     pollinations_key: str = field(default_factory=lambda: os.getenv("POLLINATIONS_KEY", "").strip())

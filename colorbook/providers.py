@@ -129,6 +129,9 @@ def check(cfg: Config) -> None:
 _exhausted: set[str] = set()
 
 
+used: dict[str, int] = {}  # images made per back-end (for the log)
+
+
 def generate(cfg: Config, prompt: str, retries: int = 3) -> bytes:
     errors = []
     for name in chain(cfg):
@@ -137,12 +140,16 @@ def generate(cfg: Config, prompt: str, retries: int = 3) -> bytes:
         fn, delay = BACKENDS[name], 5
         for attempt in range(retries):
             try:
-                return fn(cfg, prompt)
+                data = fn(cfg, prompt)
+                used[name] = used.get(name, 0) + 1
+                return data
             except (ImageError, requests.RequestException, KeyError, ValueError) as e:
                 msg = str(e)
                 errors.append(f"{name}: {msg[:120]}")
+                print(f"{name} failed: {msg[:200]}", flush=True)
                 low = msg.lower()
-                if name == "cloudflare" and ("4006" in msg or "neuron" in low or "429" in msg):
+                if name == "cloudflare" and ("4006" in msg or "neuron" in low or "429" in msg
+                                             or " 401" in msg or " 403" in msg or "header" in low):
                     _exhausted.add(name)  # daily free allowance used up -> next back-end
                     break
                 if "safety" in low or "moderation" in low or "nsfw" in low:
