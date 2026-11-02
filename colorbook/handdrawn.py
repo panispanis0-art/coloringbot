@@ -85,6 +85,18 @@ def drop_frames(ink: np.ndarray) -> np.ndarray:
     return np.where(kill[labels], 0, ink).astype(np.uint8)
 
 
+def is_painted(data: bytes) -> bool:
+    """True for coloured, shaded or 3D-looking pictures. Real line art is mostly white
+    paper with thin black lines and almost no greys or colours."""
+    arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return False
+    g = cv2.resize(arr, (256, 256))
+    white = (g > 215).mean()
+    mid = ((g > 40) & (g < 215)).mean()
+    return white < 0.8 or mid > 0.15 or colourfulness(data) > 0.02
+
+
 def colourfulness(data: bytes) -> float:
     """Share of clearly coloured pixels (coloring pages should be black and white)."""
     arr = np.frombuffer(data, np.uint8)
@@ -201,10 +213,9 @@ def process_scored(data: bytes, seed: int | None = None, brush: bool = True):
         ink = hand_inked(ink, seed=seed)
     ink = drop_specks(ink)
     score, problems = quality(gray, ink)
-    col = colourfulness(data)
-    if col > 0.03:  # the AI painted it in colour: redraw
-        score = min(score, 0.3)
-        problems = problems + ["coloured"]
+    if is_painted(data):  # the AI painted or shaded it instead of drawing lines: redraw
+        score = min(score, 0.2)
+        problems = problems + ["painted, not line art"]
     img = Image.fromarray(255 - ink).convert("1", dither=Image.Dither.NONE)
     return img, score, problems
 

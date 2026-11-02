@@ -34,13 +34,13 @@ def make_book(cfg: Config, request: str | None = None, log=print,
 
     results: dict[int, Path] = {}
     quality_log: list[tuple[int, float]] = []
-    budget = [max(2, cfg.pages // 4)]  # at most ~25 redraws per 100-page book
+    budget = [max(3, cfg.pages // 2)]  # at most ~25 redraws per 100-page book
     failures: list[str] = []
 
     def work(i: int, page: dict) -> Path:
         # Quality gate: redraw pages that are too busy, too dark, shaded or empty.
         best = None
-        for attempt in range(1 + cfg.redraws):
+        for attempt in range(1 + cfg.redraws + 2):
             prompt = page["prompt"] if attempt == 0 else page["prompt"] + SIMPLER
             raw = providers.generate(cfg, prompt)
             (folder / "pages" / f"{i:03d}_raw_{attempt}.img").write_bytes(raw)
@@ -57,9 +57,13 @@ def make_book(cfg: Config, request: str | None = None, log=print,
                     problems = problems + [f"looks wrong: {why}"]
             if best is None or score > best[1]:
                 best = (img, score, problems)
-            if score >= 0.6 or budget[0] <= 0:
+            if score >= 0.6:
                 break
-            budget[0] -= 1  # cap total redraws so a book never takes too long
+            painted = score <= 0.2  # never accept a painted/3D picture if we can avoid it
+            if not painted and (budget[0] <= 0 or attempt >= cfg.redraws):
+                break
+            if not painted:
+                budget[0] -= 1  # cap ordinary redraws so a book never takes too long
             log(f"page {i + 1} redraw ({', '.join(problems)})")
         img, score, problems = best
         if i != 999:
