@@ -197,6 +197,10 @@ def review_page(cfg: Config, png: bytes, scene: str) -> tuple[bool, str]:
                 _vision_state["off"] = True
                 return True, ""
             text = r.json()["result"].get("response") or ""
+            if not isinstance(text, str):  # the model sometimes returns parsed JSON
+                import json as _json
+                text = _json.dumps(text)
+            print("vision check:", text[:160].replace("\n", " "), flush=True)
             low = text.lower().replace(" ", "")
             bad = '"hybrid":true' in low or '"deformed":true' in low
             m = re.search(r'"reason"\s*:\s*"([^"]*)"', text)
