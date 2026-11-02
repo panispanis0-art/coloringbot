@@ -41,6 +41,17 @@ STYLE = ("coloring book page for kids, {scene}, cute simple cartoon, clean bold 
          "large simple shapes, lots of white space, full body in frame")
 
 
+COLOR_WORDS = re.compile(
+    r"\b(red|orange|yellow|green|blue|purple|violet|pink|brown|black|white|gray|grey|golden|"
+    r"gold|silver|colou?rful|bright|dark|light|pastel|rainbow-colou?red|striped|spotted|shiny|"
+    r"glowing|sparkling|vivid|neon)\b\s*", re.I)
+
+
+def _clean_scene(scene: str) -> str:
+    # Color and lighting words push image models toward painted, shaded art.
+    return re.sub(r"\s{2,}", " ", COLOR_WORDS.sub("", scene)).strip(" ,.")
+
+
 def _history_path(cfg: Config) -> Path:
     return cfg.state_dir / "history.json"
 
@@ -125,7 +136,8 @@ Return JSON: {{"title": "short fun book title", "theme": "theme in 3-6 words",
 "character": "the fixed character description",
 "pages": [{{"subject": "2-5 words", "scene": "one sentence describing a simple, cute scene"}}]}}
 with exactly {cfg.pages} pages. Every page must be a clearly different scene. Keep scenes simple: one main subject, at most 2-3 background items,
-nothing scary, no text or letters in the picture, no real brands or characters."""
+nothing scary, no text or letters in the picture, no real brands or characters.
+Never mention colors, light, shadows or textures: these are black-and-white outline pages."""
     data = _extract_json(_ask_llm(cfg, prompt))
     pages = [p for p in data.get("pages", []) if p.get("scene")]
     if len(pages) < cfg.pages * 0.8:
@@ -169,6 +181,6 @@ def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
         pages.append(p)
     plan["pages"] = pages[: cfg.pages]
     for p in plan["pages"]:
-        p["prompt"] = STYLE.format(scene=p["scene"].rstrip(". "))
+        p["prompt"] = STYLE.format(scene=_clean_scene(p["scene"]))
     save_history(cfg, history + [plan["theme"]])
     return plan
