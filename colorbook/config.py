@@ -22,16 +22,16 @@ def _int(name: str, default: int) -> int:
 
 def _cf_parts() -> tuple[str, str]:
     """Find the account id and API token even if the secrets were pasted with
-    extra lines, spaces or labels (e.g. both values in one box)."""
+    extra text (e.g. the whole 'curl ... Bearer <token>' example)."""
     import re
     acc_raw = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
     tok_raw = os.getenv("CLOUDFLARE_API_TOKEN", "")
-    words = lambda s: re.findall(r"[A-Za-z0-9_-]{20,}", s)
+    words = lambda s: re.findall(r"[A-Za-z0-9_-]{30,}", s)
     hexid = lambda w: re.fullmatch(r"[0-9a-f]{32}", w) is not None
-    acc = next((w for w in words(acc_raw) + words(tok_raw) if hexid(w)), acc_raw.strip())
-    toks = [w for w in words(tok_raw) if w != acc] or [w for w in words(acc_raw) if w != acc]
-    tok = next((w for w in toks if not hexid(w)), toks[0] if toks else "")
-    return acc, tok
+    acc = next((w for w in words(acc_raw) + words(tok_raw) if hexid(w)), "")
+    m = re.search(r"Bearer\s+([A-Za-z0-9_-]{30,})", tok_raw)
+    toks = ([m.group(1)] if m else []) + [w for w in words(tok_raw) + words(acc_raw) if not hexid(w)]
+    return acc, (toks[0] if toks else "")
 
 
 @dataclass
