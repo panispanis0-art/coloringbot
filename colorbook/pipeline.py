@@ -32,7 +32,7 @@ def make_book(cfg: Config, request: str | None = None, log=print,
 
     results: dict[int, Path] = {}
     quality_log: list[tuple[int, float]] = []
-    budget = [max(0, cfg.pages // 4)]  # at most ~25 redraws per 100-page book
+    budget = [max(2, cfg.pages // 4)]  # at most ~25 redraws per 100-page book
     failures: list[str] = []
 
     def work(i: int, page: dict) -> Path:

@@ -34,6 +34,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PARALLEL: "3"
+          PAGES: "5"
         run: python -m colorbook poll
       - name: Save state
         if: always()

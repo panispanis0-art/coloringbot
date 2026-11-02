@@ -15,10 +15,10 @@ import requests
 
 from .config import Config
 
-HELP = ("Hi! I make printable 100-page coloring books for kids.\n\n"
+HELP = ("Hi! I make printable coloring books for kids.\n\n"
         "/newbook  a new book with a fresh theme\n"
         "/newbook dinosaurs at the beach  a book on your theme\n\n"
-        "I check for messages every few minutes, and a book takes about 15-75 minutes.")
+        "I check for messages every few minutes, and a book takes a few minutes.")
 
 
 class TG:
