@@ -179,8 +179,11 @@ def review_page(cfg: Config, png: bytes, scene: str) -> tuple[bool, str]:
         "human hands or feet, shoes, walking or dancing upright like a person), or a person "
         "with animal parts. deformed = extra or missing legs, arms, eyes or tails, merged or "
         "broken bodies.")
-    body = {"messages": [{"role": "user", "content": question}],
-            "image": list(png), "max_tokens": 120}
+    data_url = "data:image/png;base64," + base64.b64encode(png).decode()
+    body = {"messages": [{"role": "user", "content": [
+                {"type": "text", "text": question},
+                {"type": "image_url", "image_url": {"url": data_url}}]}],
+            "max_tokens": 120}
     for _ in range(2):
         try:
             r = requests.post(url, headers=head, json=body, timeout=120)
