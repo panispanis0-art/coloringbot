@@ -38,7 +38,8 @@ THEME_BANK = {
 
 STYLE = ("coloring book page for kids, {scene}, cute simple cartoon, clean bold black "
          "outlines on a pure white background, thick even line art, no fill, flat 2D, "
-         "large simple shapes, lots of white space, full body in frame. "
+         "large simple shapes, lots of white space, full body in frame, one single scene "
+         "(no floating heads, no extra portraits or insets). "
          "Animals have their real natural animal body and anatomy, on their own legs and paws, "
          "like a nature picture book, not dressed, not human-like")
 
@@ -185,7 +186,14 @@ def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
         p["scene"] += f", {random.choice(ACTIONS)}"
         pages.append(p)
     plan["pages"] = pages[: cfg.pages]
+    char = _clean_scene(plan.get("character") or "")
+    name = char.split(",")[0].split()[0] if char else ""
     for p in plan["pages"]:
-        p["prompt"] = STYLE.format(scene=_clean_scene(p["scene"]))
+        scene = _clean_scene(p["scene"])
+        # Always say what the main character IS, or the image AI invents a random animal.
+        if char and name and name.lower() in scene.lower() and char.lower() not in scene.lower():
+            scene = re.sub(rf"\b{re.escape(name)}\b('s)?", lambda m: (char if not m.group(1) else char + "'s"),
+                           scene, count=1)
+        p["prompt"] = STYLE.format(scene=scene)
     save_history(cfg, history + [plan["theme"]])
     return plan
