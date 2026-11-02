@@ -146,12 +146,70 @@ def story_page(art: Image.Image, caption: str | None, number: int, page_size) ->
     return page
 
 
+def maze_page(hero_name: str, hero_art: Image.Image | None, page_size, seed: int = 0) -> Image.Image:
+    """Bonus activity: a hand-drawn-style maze that ends with the book's hero."""
+    import random
+    rng = random.Random(seed)
+    W, H = page_size
+    page = Image.new("L", (W, H), 255)
+    d = ImageDraw.Draw(page)
+    head = f"Help {hero_name} find the way!"
+    f = _fit_text(d, head, W - 2 * MARGIN, 150)
+    _outlined_title(d, (W // 2, MARGIN + 110), head, f)
+    cols, rows = 9, 11
+    top, art_h = MARGIN + 280, 760
+    cell = min((W - 2 * MARGIN) // cols, (H - top - MARGIN - art_h) // rows)
+    x0 = (W - cols * cell) // 2
+    # recursive backtracker
+    walls = {(c, r): {"N", "S", "E", "W"} for c in range(cols) for r in range(rows)}
+    stack, seen = [(0, 0)], {(0, 0)}
+    step = {"N": (0, -1, "S"), "S": (0, 1, "N"), "E": (1, 0, "W"), "W": (-1, 0, "E")}
+    while stack:
+        c, r = stack[-1]
+        opts = [(k, c + dx, r + dy, back) for k, (dx, dy, back) in step.items()
+                if (c + dx, r + dy) in walls and (c + dx, r + dy) not in seen]
+        if not opts:
+            stack.pop()
+            continue
+        k, nc, nr, back = rng.choice(opts)
+        walls[(c, r)].discard(k)
+        walls[(nc, nr)].discard(back)
+        seen.add((nc, nr))
+        stack.append((nc, nr))
+    walls[(0, 0)].discard("N")                 # entrance
+    walls[(cols - 1, rows - 1)].discard("S")   # exit, towards the hero
+    lw = 14
+    for (c, r), ws in walls.items():
+        x, y = x0 + c * cell, top + r * cell
+        jit = lambda: rng.uniform(-3, 3)       # slightly wobbly, like drawn by hand
+        if "N" in ws: d.line([(x + jit(), y + jit()), (x + cell + jit(), y + jit())], fill=0, width=lw)
+        if "W" in ws: d.line([(x + jit(), y + jit()), (x + jit(), y + cell + jit())], fill=0, width=lw)
+        if "S" in ws: d.line([(x + jit(), y + cell + jit()), (x + cell + jit(), y + cell + jit())], fill=0, width=lw)
+        if "E" in ws: d.line([(x + cell + jit(), y + jit()), (x + cell + jit(), y + cell + jit())], fill=0, width=lw)
+    for (c, r) in walls:  # round the joints
+        x, y = x0 + c * cell, top + r * cell
+        d.ellipse([x - lw // 2, y - lw // 2, x + lw // 2, y + lw // 2], fill=0)
+    d.text((x0 + cell // 2, top - 40), "START", font=_font(70), fill=0, anchor="mb")
+    if hero_art is not None:
+        a = hero_art.convert("L")
+        bbox = ImageOps.invert(a).getbbox()
+        if bbox:
+            a = a.crop(bbox)
+        a.thumbnail((900, art_h - 50), Image.LANCZOS)
+        ex = x0 + (cols - 1) * cell + cell // 2
+        page.paste(a, (min(W - MARGIN - a.width, max(MARGIN, ex - a.width // 2)), top + rows * cell + 60))
+    return page
+
+
 def make_pdf(title: str, arts: list[Image.Image], out: Path, page_size_name="A4",
-             captions: list[str] | None = None, cover_art: Image.Image | None = None) -> Path:
+             captions: list[str] | None = None, cover_art: Image.Image | None = None,
+             hero_name: str | None = None) -> Path:
     size = SIZES.get(page_size_name, SIZES["A4"])
     pages = [cover(title, cover_art or arts[0], size), belongs_to(size)]
     caps = captions or [None] * len(arts)
     pages += [story_page(a, c, i + 1, size) for i, (a, c) in enumerate(zip(arts, caps))]
+    if hero_name:
+        pages.append(maze_page(hero_name, cover_art or arts[0], size, seed=len(title)))
     bw = [p.convert("1", dither=Image.Dither.NONE) for p in pages]
     bw[0].save(out, "PDF", resolution=DPI, save_all=True, append_images=bw[1:],
                title=title, author="Coloring Book Bot")

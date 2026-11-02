@@ -108,7 +108,8 @@ def make_book(cfg: Config, request: str | None = None, log=print,
         cover_art = None
     captions = [plan["pages"][i].get("caption") for i in order]
     pdf = book.make_pdf(plan["title"], arts, folder / f"{_slug(plan['title'])}.pdf", cfg.page_size,
-                        captions=captions, cover_art=cover_art)
+                        captions=captions, cover_art=cover_art,
+                        hero_name=(plan.get("character") or "").split(",")[0].strip()[:20] or None)
     avg = sum(q for _, q in quality_log) / max(1, len(quality_log))
     log(f"Average page quality: {avg:.2f}; images by back-end: {providers.used}")
     (folder / "plan.txt").write_text(
