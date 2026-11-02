@@ -9,7 +9,8 @@ DPI = 300
 SIZES = {"A4": (2480, 3508), "LETTER": (2550, 3300)}
 MARGIN = 170  # ~0.57 in
 
-FONT_CANDIDATES = [
+HAND_FONT = str(Path(__file__).parent / "fonts" / "Chewy-Regular.ttf")  # hand-lettered look, Apache-2.0
+FONT_CANDIDATES = [HAND_FONT,
     "DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "arialbd.ttf", "C:/Windows/Fonts/comicbd.ttf", "C:/Windows/Fonts/arialbd.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf", "/Library/Fonts/Arial Bold.ttf",
@@ -76,14 +77,16 @@ def cover(title: str, art: Image.Image, page_size) -> Image.Image:
     title_h = 900
     page = _place(art, page_size, top=title_h, bottom=MARGIN + 150)
     d = ImageDraw.Draw(page)
-    f = _fit_text(d, title, W - 2 * MARGIN, start=230)
-    lines = _wrap(d, title, f, W - 2 * MARGIN)
-    if len(lines) > 2:
-        f = _font(150)
-        lines = _wrap(d, title, f, W - 2 * MARGIN)[:3]
-    y0 = title_h // 2 - (len(lines) - 1) * f.size * 0.6
+    # biggest size at which the title fits on at most 3 lines
+    for size in range(300, 90, -10):
+        f = _font(size)
+        lines = _wrap(d, title, f, W - 2 * MARGIN)
+        if len(lines) <= 3 and all(d.textlength(l, font=f) <= W - 2 * MARGIN for l in lines) \
+                and len(lines) * size * 1.15 <= title_h - 120:
+            break
+    y0 = title_h // 2 - (len(lines) - 1) * f.size * 0.575
     for i, ln in enumerate(lines):
-        _outlined_title(d, (W // 2, int(y0 + i * f.size * 1.2)), ln, f)
+        _outlined_title(d, (W // 2, int(y0 + i * f.size * 1.15)), ln, f)
     d.text((W // 2, H - MARGIN - 40), "Coloring Book", font=_font(90), fill=0, anchor="mm")
     return page
 

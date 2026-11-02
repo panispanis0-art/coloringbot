@@ -42,6 +42,7 @@ class Config:
     openai_text_model: str = field(default_factory=lambda: os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1-mini").strip())
     gemini_image_model: str = field(default_factory=lambda: os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip())
     gemini_text_model: str = field(default_factory=lambda: os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash").strip())
+    redraws: int = field(default_factory=lambda: _int("REDRAWS", 2))
     parallel: int = field(default_factory=lambda: _int("PARALLEL", 4))
     auto_every_hours: int = field(default_factory=lambda: _int("AUTO_EVERY_HOURS", 0))
     out_dir: Path = ROOT / "books"

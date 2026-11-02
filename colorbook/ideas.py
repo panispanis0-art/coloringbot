@@ -99,7 +99,12 @@ def _ask_llm(cfg: Config, prompt: str) -> str:
                           timeout=180)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
-    raise RuntimeError("no text AI key configured")
+    # Free fallback with no key: Pollinations' OpenAI-compatible text endpoint.
+    r = requests.post("https://text.pollinations.ai/openai",
+                      json={"model": "openai", "messages": [{"role": "user", "content": prompt}]},
+                      timeout=300)
+    r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
 
 
 def _llm_plan(cfg: Config, history: list[str], request: str | None) -> dict:
@@ -113,16 +118,24 @@ def _llm_plan(cfg: Config, history: list[str], request: str | None) -> dict:
 {ask}
 Do NOT reuse any of these past themes: {json.dumps(history[-60:])}.
 
+Make it feel like a real, designed book, not random pictures:
+- Invent ONE main character (a cute animal or a kid) with a name and a short, fixed look
+  (e.g. "Pip, a round little hedgehog with a striped scarf"). Put that exact description in
+  most scenes so the character looks the same on every page. Some pages can show friends,
+  places or objects from the same world instead.
+- Order the pages as a gentle story from morning to night or start to finish of an adventure.
+
 Return JSON: {{"title": "short fun book title", "theme": "theme in 3-6 words",
+"character": "the fixed character description",
 "pages": [{{"subject": "2-5 words", "scene": "one sentence describing a simple, cute scene"}}]}}
-with exactly {cfg.pages} pages. Every page must be a different subject or a clearly
-different scene. Keep scenes simple: one main subject, at most 2-3 background items,
+with exactly {cfg.pages} pages. Every page must be a clearly different scene. Keep scenes simple: one main subject, at most 2-3 background items,
 nothing scary, no text or letters in the picture, no real brands or characters."""
     data = _extract_json(_ask_llm(cfg, prompt))
     pages = [p for p in data.get("pages", []) if p.get("scene")]
     if len(pages) < cfg.pages * 0.8:
         raise ValueError(f"model returned only {len(pages)} pages")
-    return {"title": data.get("title") or data.get("theme", "My Coloring Book"),
+    return {"character": data.get("character", ""),
+            "title": data.get("title") or data.get("theme", "My Coloring Book"),
             "theme": data.get("theme", data.get("title", "")),
             "pages": pages}
 

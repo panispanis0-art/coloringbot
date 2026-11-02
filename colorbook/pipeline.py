@@ -13,6 +13,10 @@ from . import book, handdrawn, ideas, providers
 from .config import Config
 
 
+SIMPLER = (" Make it much simpler: fewer, bigger shapes, thick bold outlines, "
+           "large empty areas to color, no tiny details, no shading, no black fills.")
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:50] or "book"
 
@@ -27,12 +31,25 @@ def make_book(cfg: Config, request: str | None = None, log=print,
     log(f"Book: {plan['title']} ({len(plan['pages'])} pages) via {'+'.join(providers.chain(cfg))}")
 
     results: dict[int, Path] = {}
+    quality_log: list[tuple[int, float]] = []
+    budget = [max(0, cfg.pages // 4)]  # at most ~25 redraws per 100-page book
     failures: list[str] = []
 
     def work(i: int, page: dict) -> Path:
-        raw = providers.generate(cfg, page["prompt"])
-        (folder / "pages" / f"{i:03d}_raw.bin").write_bytes(raw)
-        img = handdrawn.process(raw, seed=random.randint(0, 2**31))
+        # Quality gate: redraw pages that are too busy, too dark, shaded or empty.
+        best = None
+        for attempt in range(1 + cfg.redraws):
+            prompt = page["prompt"] if attempt == 0 else page["prompt"] + SIMPLER
+            raw = providers.generate(cfg, prompt)
+            img, score, problems = handdrawn.process_scored(raw, seed=random.randint(0, 2**31))
+            if best is None or score > best[1]:
+                best = (img, score, problems)
+            if score >= 0.6 or budget[0] <= 0:
+                break
+            budget[0] -= 1  # cap total redraws so a book never takes too long
+            log(f"page {i + 1} redraw ({', '.join(problems)})")
+        img, score, problems = best
+        quality_log.append((i, score))
         p = folder / "pages" / f"{i:03d}.png"
         img.save(p, optimize=True)
         return p
@@ -62,8 +79,8 @@ def make_book(cfg: Config, request: str | None = None, log=print,
     order = sorted(results)
     arts = [Image.open(results[i]) for i in order]
     pdf = book.make_pdf(plan["title"], arts, folder / f"{_slug(plan['title'])}.pdf", cfg.page_size)
-    for raw in (folder / "pages").glob("*_raw.bin"):
-        raw.unlink()
+    avg = sum(q for _, q in quality_log) / max(1, len(quality_log))
+    log(f"Average page quality: {avg:.2f}")
     (folder / "plan.txt").write_text(
         plan["title"] + "\n\n" + "\n".join(f"{n + 1}. {plan['pages'][i]['scene']}" for n, i in enumerate(order)))
     log(f"Done: {len(order)} pages, {len(failures)} errors -> {pdf}")

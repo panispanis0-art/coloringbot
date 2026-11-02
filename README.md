@@ -38,5 +38,6 @@ The bot answers only the chat ids in `TELEGRAM_CHAT_ID`. Set `AUTO_EVERY_HOURS=2
 Books are also saved in `books/` with each page as PNG and the scene list in `plan.txt`.
 
 ## Dependencies
-Only well-known packages: python-telegram-bot, OpenCV, NumPy, Pillow, requests, python-dotenv.
+Only well-known packages: python-telegram-bot, OpenCV, NumPy, scikit-image, Pillow, requests, python-dotenv.
+The cover font is Chewy (Google Fonts, Apache 2.0), bundled in `colorbook/fonts`.
 Nothing else is downloaded or run.
