@@ -62,10 +62,38 @@ def _set_owner(cfg: Config, chat_id: int):
     (cfg.state_dir / "owner.json").write_text(json.dumps([_h(chat_id)]))
 
 
+def send_buttons(cfg: Config, tg: TG, chat: int, theme: str | None) -> None:
+    """One-tap ordering: surprise me, same again, or one of three fresh ideas."""
+    from .ideas import suggest_themes
+    rows = [[{"text": "🎲 Surprise me", "callback_data": "new:"}]]
+    if theme:
+        rows[0].append({"text": f"🔁 More {theme}"[:40], "callback_data": f"again:{theme}"[:64]})
+    for t in suggest_themes(cfg, 3):
+        rows.append([{"text": f"✨ {t}"[:60], "callback_data": f"theme:{t}"[:64]}])
+    try:
+        tg.call("sendMessage", data={"chat_id": chat, "text": "What should the next book be?",
+                                     "reply_markup": json.dumps({"inline_keyboard": rows})})
+    except Exception as e:
+        print("buttons failed:", e)
+
+
 def collect(cfg: Config, tg: TG) -> list[tuple[int, str | None]]:
-    updates = tg.call("getUpdates", data={"timeout": 0, "allowed_updates": json.dumps(["message"])})
+    updates = tg.call("getUpdates", data={"timeout": 0,
+                                          "allowed_updates": json.dumps(["message", "callback_query"])})
     jobs: list[tuple[int, str | None]] = []
     for u in updates:
+        cq = u.get("callback_query")
+        if cq:  # a tap on one of the buttons under a finished book
+            chat = ((cq.get("message") or {}).get("chat") or {}).get("id")
+            try:
+                tg.call("answerCallbackQuery", data={"callback_query_id": cq["id"],
+                                                     "text": "Coming right up!"})
+            except Exception:
+                pass
+            if chat and _h(chat) in _owner(cfg):
+                kind, _, val = (cq.get("data") or "").partition(":")
+                jobs.append((chat, val or None))
+            continue
         m = u.get("message") or {}
         text = (m.get("text") or "").strip()
         chat = (m.get("chat") or {}).get("id")
@@ -84,6 +112,7 @@ def collect(cfg: Config, tg: TG) -> list[tuple[int, str | None]]:
             continue
         if cmd in ("/start", "/help"):
             tg.say(chat, HELP)
+            send_buttons(cfg, tg, chat, None)
         elif cmd == "/newbook":
             jobs.append((chat, arg.strip() or None))
     if updates:  # confirm, so Telegram does not send them again
@@ -127,11 +156,12 @@ def run(cfg: Config) -> None:
                             data={"chat_id": chat,
                                   "caption": f"{res['title']}: {res['pages']} pages, ready to print"},
                             files={"document": (pdf.name, fh, "application/pdf")})
-            note = f"Done! Theme: {res['theme']}. Send /newbook for another."
+            note = f"Done! Theme: {res['theme']}. Tap a button for the next book, or send /newbook <your idea>."
             if res["failures"]:
                 note += f" ({len(res['failures'])} page(s) could not be drawn and were skipped.)"
             if status:
                 tg.edit(status, note)
+            send_buttons(cfg, tg, chat, res["theme"])
         except Exception as e:
             print("book failed:", e)
             tg.say(chat, f"Sorry, that book failed: {str(e)[:300]}. Send /newbook to try again.")

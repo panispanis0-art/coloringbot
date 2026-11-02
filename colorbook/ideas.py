@@ -203,3 +203,21 @@ def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
         p["prompt"] = STYLE.format(scene=scene)
     save_history(cfg, history + [plan["theme"]])
     return plan
+
+
+def suggest_themes(cfg: Config, n: int = 3) -> list[str]:
+    """A few fresh, short theme ideas for the Telegram buttons."""
+    history = load_history(cfg)
+    try:
+        season = SEASONAL[dt.date.today().month]
+        txt = _ask_llm(cfg, f"Suggest {n} fresh, specific coloring book themes kids aged "
+                            f"{cfg.age_group} love (season: {season}). Each 2-4 words, no brands. "
+                            f"Avoid: {json.dumps(history[-30:])}. "
+                            'Return JSON: {"themes": ["...", "..."]}')
+        ideas_ = [str(t).strip() for t in _extract_json(txt).get("themes", []) if str(t).strip()]
+        if len(ideas_) >= n:
+            return [t[:40] for t in ideas_[:n]]
+    except Exception:
+        pass
+    pool = [t for t in THEME_BANK if t not in history] or list(THEME_BANK)
+    return random.sample(pool, min(n, len(pool)))
