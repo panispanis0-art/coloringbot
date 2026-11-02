@@ -1,0 +1,47 @@
+name: Coloring book bot
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # check Telegram every ~10 minutes
+  workflow_dispatch: {}
+
+permissions:
+  contents: write            # to save theme history and the bot owner
+
+concurrency:
+  group: coloring-book
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Answer Telegram and make books
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          IMAGE_PROVIDER: ${{ vars.IMAGE_PROVIDER || 'free' }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          POLLINATIONS_KEY: ${{ secrets.POLLINATIONS_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PARALLEL: "3"
+        run: python -m colorbook poll
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "coloring-book-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add state/*.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "Update bot state"
+            git pull --rebase -q && git push -q
+          fi

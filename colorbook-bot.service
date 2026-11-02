@@ -1,0 +1,17 @@
+# Linux: keep the bot running 24/7 and restart it after crashes or reboots.
+# 1) Edit the two paths and User below.  2) sudo cp colorbook-bot.service /etc/systemd/system/
+# 3) sudo systemctl enable --now colorbook-bot   4) logs: journalctl -u colorbook-bot -f
+[Unit]
+Description=Coloring book Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/coloring-book
+ExecStart=/home/pi/coloring-book/.venv/bin/python -m colorbook bot
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
