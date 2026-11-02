@@ -140,7 +140,8 @@ Make it feel like a real, designed book, not random pictures:
 
 Return JSON: {{"title": "short fun book title", "theme": "theme in 3-6 words",
 "character": "the fixed character description",
-"pages": [{{"subject": "2-5 words", "scene": "one sentence describing a simple, cute scene"}}]}}
+"pages": [{{"subject": "2-5 words", "scene": "one sentence describing a simple, cute scene",
+"caption": "the storybook line printed under the picture: warm, simple words a 5-year-old enjoys, max 12 words"}}]}}
 with exactly {cfg.pages} pages. Every page must be a clearly different scene. Keep scenes simple: one main subject, at most 2-3 background items,
 nothing scary, no text or letters in the picture, no real brands or characters.
 Never mention colors, light, shadows or textures: these are black-and-white outline pages."""
@@ -189,6 +190,12 @@ def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
     char = _clean_scene(plan.get("character") or "")
     name = char.split(",")[0].split()[0] if char else ""
     for p in plan["pages"]:
+        if not p.get("caption"):
+            cap = p["scene"]
+            if char and len(char) > len(name):
+                cap = cap.replace(plan.get("character", ""), name)
+            p["caption"] = cap.split(",")[0].strip().rstrip(".") + "."
+        p["caption"] = p["caption"].strip()[:110]
         scene = _clean_scene(p["scene"])
         # Always say what the main character IS, or the image AI invents a random animal.
         if char and name and name.lower() in scene.lower() and char.lower() not in scene.lower():

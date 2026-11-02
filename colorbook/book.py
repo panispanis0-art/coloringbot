@@ -111,10 +111,47 @@ def belongs_to(page_size) -> Image.Image:
     return page
 
 
-def make_pdf(title: str, arts: list[Image.Image], out: Path, page_size_name="A4") -> Path:
+CAPTION_H = 520
+
+
+def story_page(art: Image.Image, caption: str | None, number: int, page_size) -> Image.Image:
+    """A picture with a hand-lettered story line under it, like a real picture book."""
+    W, H = page_size
+    if not caption:
+        return _place(art, page_size)
+    page = Image.new("L", (W, H), 255)
+    a = art.convert("L")
+    bbox = ImageOps.invert(a).getbbox()
+    if bbox:
+        a = a.crop(bbox)
+    box_w, box_h = W - 2 * MARGIN, H - 2 * MARGIN - CAPTION_H
+    sc = min(box_w / a.width, box_h / a.height)
+    a = a.resize((max(1, int(a.width * sc)), max(1, int(a.height * sc))), Image.LANCZOS)
+    top = MARGIN + (box_h - a.height) // 2  # keep picture and text together, centred
+    page.paste(a, ((W - a.width) // 2, top))
+    d = ImageDraw.Draw(page)
+    y_rule = top + a.height + 110
+    for x in range(MARGIN + 300, W - MARGIN - 300, 60):
+        d.ellipse([x - 7, y_rule - 7, x + 7, y_rule + 7], fill=0)
+    for size in range(120, 60, -6):
+        f = _font(size)
+        lines = _wrap(d, caption, f, W - 2 * MARGIN - 100)
+        if len(lines) <= 2:
+            break
+    y = y_rule + 80
+    for ln in lines:
+        d.text((W // 2, int(y)), ln, font=f, fill=0, anchor="mt")
+        y += f.size * 1.2
+    d.text((W // 2, H - MARGIN // 2 - 20), str(number), font=_font(60), fill=0, anchor="mm")
+    return page
+
+
+def make_pdf(title: str, arts: list[Image.Image], out: Path, page_size_name="A4",
+             captions: list[str] | None = None) -> Path:
     size = SIZES.get(page_size_name, SIZES["A4"])
     pages = [cover(title, arts[0], size), belongs_to(size)]
-    pages += [_place(a, size) for a in arts]
+    caps = captions or [None] * len(arts)
+    pages += [story_page(a, c, i + 1, size) for i, (a, c) in enumerate(zip(arts, caps))]
     bw = [p.convert("1", dither=Image.Dither.NONE) for p in pages]
     bw[0].save(out, "PDF", resolution=DPI, save_all=True, append_images=bw[1:],
                title=title, author="Coloring Book Bot")

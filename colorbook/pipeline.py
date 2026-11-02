@@ -91,7 +91,9 @@ def make_book(cfg: Config, request: str | None = None, log=print,
         raise RuntimeError("No pages could be generated. " + "; ".join(failures[-3:]))
     order = sorted(results)
     arts = [Image.open(results[i]) for i in order]
-    pdf = book.make_pdf(plan["title"], arts, folder / f"{_slug(plan['title'])}.pdf", cfg.page_size)
+    captions = [plan["pages"][i].get("caption") for i in order]
+    pdf = book.make_pdf(plan["title"], arts, folder / f"{_slug(plan['title'])}.pdf", cfg.page_size,
+                        captions=captions)
     avg = sum(q for _, q in quality_log) / max(1, len(quality_log))
     log(f"Average page quality: {avg:.2f}; images by back-end: {providers.used}")
     (folder / "plan.txt").write_text(
