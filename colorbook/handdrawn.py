@@ -1,8 +1,8 @@
 """Turn an AI image into clean, hand-inked-looking coloring line art.
 
 Steps: grayscale -> pure black/white -> hollow out big solid black blobs
-(kids need space to color) -> drop specks -> gentle line wobble -> uneven
-pen-pressure stroke weight -> 1-bit output.
+(kids need space to color) -> drop specks -> gentle line wobble -> 1-bit output.
+The AI's own lines are kept: re-tracing them scribbles small details like eyes.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 
 WORK_LONG_SIDE = 2400
+MAX_BROKEN = 7.0  # loose line ends per 1000 px: clean pages stay under 4, broken ones go over 9
 
 
 def _smooth_noise(h: int, w: int, cells: int, rng: np.random.Generator) -> np.ndarray:
@@ -135,41 +136,6 @@ def hand_inked(ink: np.ndarray, seed: int | None = None,
     return out
 
 
-def brush_strokes(ink: np.ndarray, seed: int | None = None, width_px: float = 8.0) -> np.ndarray:
-    """Re-ink the drawing like a pen: trace each line's centre, then redraw it
-    with a brush whose width swells and tapers (thin at stroke ends, slightly
-    uneven along the line). Replaces the AI's uniform, 'digital' strokes."""
-    from skimage.morphology import skeletonize
-
-    rng = np.random.default_rng(seed)
-    h, w = ink.shape
-    sk = skeletonize(ink > 0)
-    if not sk.any():
-        return ink
-    # stroke ends: skeleton pixels with exactly one neighbour
-    nb = cv2.filter2D(sk.astype(np.uint8), -1, np.ones((3, 3), np.float32)) - sk
-    ends = (sk & (nb == 1)).astype(np.uint8)
-    d_end = cv2.distanceTransform(1 - ends, cv2.DIST_L2, 5) if ends.any() else np.full((h, w), 1e3, np.float32)
-    taper = np.clip(d_end / (width_px * 4.0), 0.3, 1.0)
-    # keep naturally bold parts (big outlines) a little bolder than fine details
-    thick = cv2.distanceTransform((ink > 0).astype(np.uint8), cv2.DIST_L2, 5)
-    boldness = np.clip(thick / (width_px * 0.5), 0.75, 1.25)
-    pressure = 1.0 + _smooth_noise(h, w, 12, rng) * 0.22
-    radius = (width_px / 2.0) * taper * boldness * pressure
-    out = np.zeros_like(ink)
-    r_int = np.clip(np.round(radius), 1, int(width_px)).astype(np.int32)
-    for r in np.unique(r_int[sk]):
-        m = (sk & (r_int == r)).astype(np.uint8) * 255
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))
-        out = cv2.bitwise_or(out, cv2.dilate(m, k))
-    # keep small filled details (pupils, noses) that skeletonizing would thin out
-    n, labels, stats, _ = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8), 8)
-    small = np.zeros(n, bool)
-    small[1:] = stats[1:, cv2.CC_STAT_AREA] < ink.size * 0.002
-    out[small[labels]] = 255
-    return out
-
-
 def quality(gray: np.ndarray, ink: np.ndarray) -> tuple[float, list[str]]:
     """Score a finished page 0..1 and say what is wrong. Pages under 0.6 are redrawn."""
     problems, score = [], 1.0
@@ -199,23 +165,34 @@ def quality(gray: np.ndarray, ink: np.ndarray) -> tuple[float, list[str]]:
     return max(0.0, score), problems
 
 
-def process_scored(data: bytes, seed: int | None = None, brush: bool = True):
+def broken_lines(ink: np.ndarray) -> float:
+    """Loose line ends per 1000 px of line. A real drawing has few; a painted picture
+    pushed through the black/white step falls apart into many short pieces."""
+    from skimage.morphology import skeletonize
+
+    sk = skeletonize(ink > 0)
+    if not sk.any():
+        return 0.0
+    nb = cv2.filter2D(sk.astype(np.uint8), -1, np.ones((3, 3), np.float32)) - sk
+    return float((sk & (nb == 1)).sum()) / sk.sum() * 1000
+
+
+def process_scored(data: bytes, seed: int | None = None):
     """Bytes from the image AI -> (1-bit PIL image, score, problems)."""
     gray = _load_gray(data)
     ink = to_ink_mask(gray)
     ink = hollow_solids(ink)
     ink = drop_frames(ink)
     ink = drop_specks(ink)
-    if brush:
-        ink = hand_inked(ink, seed=seed, wobble_px=1.6, weight=0.0)
-        ink = brush_strokes(ink, seed=seed)
-    else:
-        ink = hand_inked(ink, seed=seed)
+    ink = hand_inked(ink, seed=seed, wobble_px=1.0, weight=0.0)
     ink = drop_specks(ink)
     score, problems = quality(gray, ink)
     if is_painted(data):  # the AI painted or shaded it instead of drawing lines: redraw
         score = min(score, 0.2)
         problems = problems + ["painted, not line art"]
+    if broken_lines(ink) > MAX_BROKEN:
+        score = min(score, 0.2)
+        problems = problems + ["broken lines"]
     img = Image.fromarray(255 - ink).convert("1", dither=Image.Dither.NONE)
     return img, score, problems
 

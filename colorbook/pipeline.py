@@ -55,16 +55,18 @@ def make_book(cfg: Config, request: str | None = None, log=print,
                 if not ok:
                     score = 0.45  # below the bar: redraw, but still better than a broken page
                     problems = problems + [f"looks wrong: {why}"]
-            if best is None or score > best[1]:
+            painted = score <= 0.2  # painted, 3D or broken: never goes in the book
+            if not painted and (best is None or score > best[1]):
                 best = (img, score, problems)
             if score >= 0.6:
                 break
-            painted = score <= 0.2  # never accept a painted/3D picture if we can avoid it
             if not painted and (budget[0] <= 0 or attempt >= cfg.redraws):
                 break
             if not painted:
                 budget[0] -= 1  # cap ordinary redraws so a book never takes too long
             log(f"page {i + 1} redraw ({', '.join(problems)})")
+        if best is None:  # better a shorter book than a broken page
+            raise RuntimeError("only painted or broken pictures")
         img, score, problems = best
         if i != 999:
             quality_log.append((i, score))

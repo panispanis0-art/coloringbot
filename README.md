@@ -11,8 +11,9 @@ Send **/newbook** for a fresh theme, or **/newbook dinosaurs at the beach** for 
    Default `IMAGE_PROVIDER=free`: Cloudflare Workers AI (Flux, free 10,000 neurons/day, about 170 pages)
    and then Pollinations.ai (no key, ~1 image per 45 s) when the free daily Cloudflare amount is used up.
 3. **Hand-drawn cleanup** (`colorbook/handdrawn.py`): removes gray and shading, turns big solid
-   black areas into outlines so kids can color them, removes specks, adds a slight hand wobble and
-   uneven pen-pressure line weight, then saves crisp 1-bit art.
+   black areas into outlines so kids can color them, removes specks, adds a slight hand wobble,
+   then saves crisp 1-bit art. Painted or broken pictures are redrawn and never go in the book;
+   if a page keeps coming out that way it is skipped and the bot tells you.
 4. **Book**: cover with hollow letters, a "This book belongs to" page and 100 pages, as an A4 or Letter
    PDF at 300 dpi, about 1-10 MB. It is split in two parts if it ever goes over Telegram's 50 MB limit.
 
