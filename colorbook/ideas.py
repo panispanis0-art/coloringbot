@@ -192,8 +192,7 @@ def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
         scene = _clean_scene(p["scene"])
         # Always say what the main character IS, or the image AI invents a random animal.
         if char and name and name.lower() in scene.lower() and char.lower() not in scene.lower():
-            scene = re.sub(rf"\b{re.escape(name)}\b('s)?", lambda m: (char if not m.group(1) else char + "'s"),
-                           scene, count=1)
+            scene = f"{scene} ({char})"
         p["prompt"] = STYLE.format(scene=scene)
     save_history(cfg, history + [plan["theme"]])
     return plan
