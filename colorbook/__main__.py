@@ -57,6 +57,16 @@ def main(argv: list[str]) -> None:
         print("\nPDF:", res["pdf"])
         if do_send:
             send(cfg, res)
+    elif cmd == "sample":
+        # Make a small book and keep its pages in samples/latest (for quality review).
+        import shutil
+        from .pipeline import make_book
+        theme = " ".join(argv[1:]) or None
+        res = make_book(cfg, theme)
+        out = cfg.out_dir.parent / "samples" / "latest"
+        shutil.rmtree(out, ignore_errors=True)
+        shutil.copytree(res["folder"], out)
+        print("samples saved to", out)
     elif cmd == "poll":
         from .poll import run
         run(cfg)

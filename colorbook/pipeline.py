@@ -41,6 +41,7 @@ def make_book(cfg: Config, request: str | None = None, log=print,
         for attempt in range(1 + cfg.redraws):
             prompt = page["prompt"] if attempt == 0 else page["prompt"] + SIMPLER
             raw = providers.generate(cfg, prompt)
+            (folder / "pages" / f"{i:03d}_raw_{attempt}.img").write_bytes(raw)
             img, score, problems = handdrawn.process_scored(raw, seed=random.randint(0, 2**31))
             if best is None or score > best[1]:
                 best = (img, score, problems)

@@ -3,7 +3,16 @@ name: Coloring book bot
 on:
   schedule:
     - cron: "*/10 * * * *"   # check Telegram every ~10 minutes
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      sample:
+        description: "Make a sample book (no Telegram) and save its pages in samples/latest"
+        type: boolean
+        default: false
+      theme:
+        description: "Optional theme for the sample"
+        type: string
+        default: ""
 
 permissions:
   contents: write            # to save theme history and the bot owner
@@ -35,13 +44,17 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PARALLEL: "3"
           PAGES: "5"
-        run: python -m colorbook poll
+          SAMPLE: ${{ inputs.sample }}
+          THEME: ${{ inputs.theme }}
+        run: |
+          if [ "$SAMPLE" = "true" ]; then python -m colorbook sample $THEME; else python -m colorbook poll; fi
       - name: Save state
         if: always()
         run: |
           git config user.name "coloring-book-bot"
           git config user.email "bot@users.noreply.github.com"
           git add state/*.json 2>/dev/null || true
+          git add -A samples 2>/dev/null || true
           if ! git diff --cached --quiet; then
             git commit -m "Update bot state"
             git pull --rebase -q && git push -q
