@@ -147,9 +147,9 @@ def story_page(art: Image.Image, caption: str | None, number: int, page_size) ->
 
 
 def make_pdf(title: str, arts: list[Image.Image], out: Path, page_size_name="A4",
-             captions: list[str] | None = None) -> Path:
+             captions: list[str] | None = None, cover_art: Image.Image | None = None) -> Path:
     size = SIZES.get(page_size_name, SIZES["A4"])
-    pages = [cover(title, arts[0], size), belongs_to(size)]
+    pages = [cover(title, cover_art or arts[0], size), belongs_to(size)]
     caps = captions or [None] * len(arts)
     pages += [story_page(a, c, i + 1, size) for i, (a, c) in enumerate(zip(arts, caps))]
     bw = [p.convert("1", dither=Image.Dither.NONE) for p in pages]
