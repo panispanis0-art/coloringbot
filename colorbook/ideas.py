@@ -36,13 +36,9 @@ THEME_BANK = {
     "Cute Kawaii Food": ["cupcake", "ice cream cone", "donut", "pizza slice", "watermelon", "strawberry", "taco", "sushi", "pancakes", "birthday cake", "cookie", "popcorn", "banana", "avocado", "lollipop", "milkshake", "hot dog", "carrot", "apple", "boba tea"],
 }
 
-STYLE = (
-    "Children's coloring book page, black and white line art only, thick clean "
-    "outlines, simple large shapes easy for small children to color, no shading, "
-    "no gray, no color, no hatching, no text, white background, single subject "
-    "centered with a few simple background elements, hand-inked look with "
-    "slightly imperfect organic lines, cute friendly style. Scene: "
-)
+STYLE = ("coloring book page for kids, {scene}, cute simple cartoon, clean bold black "
+         "outlines on a pure white background, thick even line art, no fill, flat 2D, "
+         "large simple shapes, lots of white space, full body in frame")
 
 
 def _history_path(cfg: Config) -> Path:
@@ -173,6 +169,6 @@ def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
         pages.append(p)
     plan["pages"] = pages[: cfg.pages]
     for p in plan["pages"]:
-        p["prompt"] = STYLE + p["scene"]
+        p["prompt"] = STYLE.format(scene=p["scene"].rstrip(". "))
     save_history(cfg, history + [plan["theme"]])
     return plan

@@ -89,16 +89,17 @@ def _pollinations(cfg: Config, prompt: str) -> bytes:
     url = "https://image.pollinations.ai/prompt/" + quote(prompt[:1500], safe="")
     headers = {"Authorization": f"Bearer {cfg.pollinations_key}"} if cfg.pollinations_key else {}
     r = requests.get(url, params={"width": 768, "height": 1024, "seed": random.randint(1, 10**9),
+                                  "model": "flux", "enhance": "false",
                                   "nologo": "true", "safe": "true"},
                      headers=headers, timeout=300)
     if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
         raise ImageError(f"Pollinations {r.status_code}: {r.text[:200]}")
     if cfg.pollinations_key:
         return r.content
-    # Anonymous images carry a small logo in the bottom-right corner: blank it.
+    # Anonymous images carry a small logo along the bottom edge: crop it off.
     img = Image.open(io.BytesIO(r.content)).convert("RGB")
     w, h = img.size
-    ImageDraw.Draw(img).rectangle([int(w * 0.62), int(h * 0.94), w, h], fill="white")
+    img = img.crop((0, 0, w, int(h * 0.93)))
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()

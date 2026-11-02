@@ -66,6 +66,24 @@ def hollow_solids(ink: np.ndarray, line_px: int = 9) -> np.ndarray:
     return cv2.bitwise_and(ink, cv2.bitwise_not(big))
 
 
+def drop_frames(ink: np.ndarray) -> np.ndarray:
+    """Remove borders, vignettes and frames: ink touching the image edge, and thin
+    loops that enclose almost the whole picture (AI images often add these)."""
+    h, w = ink.shape
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8), 8)
+    kill = np.zeros(n, bool)
+    m = 4
+    for i in range(1, n):
+        x, y, bw, bh, area = stats[i]
+        touches = x <= m or y <= m or x + bw >= w - m or y + bh >= h - m
+        huge = bw > 0.8 * w and bh > 0.75 * h
+        sparse = area < 0.12 * bw * bh
+        if (touches and (bw > 0.5 * w or bh > 0.5 * h)) or (huge and sparse and touches) \
+                or (huge and sparse and area < 0.03 * w * h):
+            kill[i] = True
+    return np.where(kill[labels], 0, ink).astype(np.uint8)
+
+
 def drop_specks(ink: np.ndarray, min_frac: float = 0.00004) -> np.ndarray:
     n, labels, stats, _ = cv2.connectedComponentsWithStats((ink > 0).astype(np.uint8), 8)
     keep = np.zeros(n, dtype=bool)
@@ -136,8 +154,11 @@ def quality(gray: np.ndarray, ink: np.ndarray) -> tuple[float, list[str]]:
         problems.append("almost empty"); score -= 0.6
     elif ink_ratio > 0.22:
         problems.append("too dark / too much ink"); score -= 0.5
-    mid = ((gray > 60) & (gray < 200)).mean()
-    if mid > 0.30:
+    dark = (gray < 70).mean()
+    if dark > 0.12:
+        problems.append("big dark areas / vignette"); score -= 0.5
+    mid = ((gray > 70) & (gray < 210)).mean()
+    if mid > 0.15:
         problems.append("shaded or photo-like, not line art"); score -= 0.4
     # count colourable areas: hundreds of tiny ones = too busy for kids
     white = (ink == 0).astype(np.uint8)
@@ -159,6 +180,7 @@ def process_scored(data: bytes, seed: int | None = None, brush: bool = True):
     gray = _load_gray(data)
     ink = to_ink_mask(gray)
     ink = hollow_solids(ink)
+    ink = drop_frames(ink)
     ink = drop_specks(ink)
     if brush:
         ink = hand_inked(ink, seed=seed, wobble_px=1.6, weight=0.0)
