@@ -18,7 +18,8 @@ from .config import Config
 
 HELP = ("Hi! I make printable coloring books for kids.\n\n"
         "/newbook  a new book with a fresh theme\n"
-        "/newbook dinosaurs at the beach  a book on your theme\n\n"
+        "/newbook dinosaurs at the beach  a book on your theme\n"
+        "/newbook 3 dinosaurs  a 3-page book\n\n"
         "I check for messages every few minutes, and a book takes a few minutes.")
 
 
@@ -155,7 +156,14 @@ def run(cfg: Config) -> None:
 def make_books(cfg: Config, tg: TG, jobs) -> None:
     from .bot import _split_pdfs
     from .pipeline import make_book
+    import dataclasses, re
     for chat, theme in jobs:
+        # "/newbook 3 dinosaurs" or "/newbook 3 pages" -> a 3-page book
+        book_cfg = cfg
+        m = re.match(r"\s*(\d{1,2})\b\s*(?:pages?\b|p\b)?\s*(.*)", theme or "", re.I)
+        if m and 1 <= int(m.group(1)) <= 30:
+            book_cfg = dataclasses.replace(cfg, pages=int(m.group(1)))
+            theme = m.group(2).strip() or None
         what = f"on “{theme}”" if theme else "with a fresh theme"
         status = tg.say(chat, f"Got it! Making a new book {what}. Thinking of ideas…")
         last = [0.0]
@@ -166,7 +174,7 @@ def make_books(cfg: Config, tg: TG, jobs) -> None:
                 tg.edit(status, f"Drawing pages: {done}/{total}")
 
         try:
-            res = make_book(cfg, theme, progress=progress)
+            res = make_book(book_cfg, theme, progress=progress)
             preview = res["preview"][:4]
             try:
                 files = {f"p{i}": (p.name, p.read_bytes(), "image/png") for i, p in enumerate(preview)}
