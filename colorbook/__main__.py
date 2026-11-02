@@ -42,8 +42,21 @@ def check(cfg: Config) -> None:
         print("Test image FAILED:", e)
 
 
+def describe_cf() -> None:
+    # Safe description of the Cloudflare secrets (shape only, never the values).
+    import os, re
+    for k in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"):
+        v = os.getenv(k, "")
+        parts = v.split()
+        print(f"{k}: {len(v)} chars, {len(parts)} part(s): " + ", ".join(
+            f"len {len(p)}{' hex32' if re.fullmatch(r'[0-9a-f]{32}', p) else ''}" for p in parts))
+
+
 def main(argv: list[str]) -> None:
     cfg = Config()
+    if argv and argv[0] in ("sample", "check"):
+        describe_cf()
+        print("Cloudflare ready:", bool(cfg.cf_account and cfg.cf_token))
     cmd = argv[0] if argv else "help"
     if cmd == "bot":
         from .bot import main as bot_main
