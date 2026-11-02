@@ -164,14 +164,23 @@ ACTIONS = ["happy", "playing", "sleeping", "waving hello", "with a friend",
            "having a picnic", "in a cozy house"]
 
 
+def _bank_subjects(theme: str) -> list[str]:
+    # Stay on the requested theme: use a matching bank, or else the theme itself.
+    words = lambda s: {w.rstrip("s") for w in s.lower().split()}
+    for name, subjects in THEME_BANK.items():
+        if words(theme) & words(name):
+            return subjects
+    return [theme]
+
+
 def _fallback_plan(cfg: Config, history: list[str], request: str | None) -> dict:
     themes = [t for t in THEME_BANK if t not in history] or list(THEME_BANK)
     theme = request if request else random.choice(themes)
-    subjects = THEME_BANK.get(theme, list(THEME_BANK[random.choice(list(THEME_BANK))]))
+    subjects = _bank_subjects(theme)
     combos = [(s, a) for s in subjects for a in ACTIONS]
     random.shuffle(combos)
     pages = [{"subject": s, "scene": f"a cute {s} {a}"} for s, a in combos[: cfg.pages]]
-    return {"title": f"{theme} Coloring Book", "theme": theme, "pages": pages}
+    return {"title": f"{theme[:1].upper()}{theme[1:]} Coloring Book", "theme": theme, "pages": pages}
 
 
 def plan_book(cfg: Config, request: str | None = None, log=print) -> dict:
