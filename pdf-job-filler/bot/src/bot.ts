@@ -2,6 +2,7 @@ import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { config } from './config.ts';
 import { loadTemplate, prepareJob, renderJob, saveTemplate, suggestJobNames, templateSummary } from './pdf.ts';
+import { renderPreview } from './preview.ts';
 import { addJob, getJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
 export const HELP = [
@@ -123,10 +124,15 @@ async function finish(ctx: Context, job: Job, jobName: string) {
   await ctx.sendChatAction('upload_document').catch(() => {});
   try {
     const res = await renderJob({ prepared: job.prepared, jobName: job.jobName, overrides: job.overrides, flatten: isFlat(job) });
-    await ctx.replyWithDocument(
-      { source: Buffer.from(res.bytes), filename: res.fileName },
-      { caption: resultCaption(job, res.fileName, res.values, res.warnings), parse_mode: 'HTML', ...resultButtons(job) },
-    );
+    const card = { caption: resultCaption(job, res.fileName, res.values, res.warnings), parse_mode: 'HTML' as const, ...resultButtons(job) };
+    const picture = config.preview ? await renderPreview(res.bytes).catch((e) => void console.warn('Preview failed:', e)) : undefined;
+    if (picture) {
+      // picture of page 1 with the card and buttons, then the PDF itself
+      await ctx.replyWithPhoto({ source: picture, filename: 'preview.png' }, card);
+      await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName });
+    } else {
+      await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, card);
+    }
     console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${res.warnings.length} warnings)`);
   } catch (e) {
     console.error(e);

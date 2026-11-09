@@ -12,9 +12,11 @@ const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'pjf-bot-'));
 process.env.ALLOWED_USER_ID = '42';
 process.env.TEMPLATE_PATH = path.join(tmp, 'template.json');
 process.env.BOT_TOKEN = '123:TEST';
+process.env.PREVIEW = 'false'; // most tests look at the PDF message; the preview test turns it on
 
 const { createBot, commandArgs } = await import('../src/bot.ts');
 const { clearJobs } = await import('../src/jobs.ts');
+const { config } = await import('../src/config.ts');
 const { listFormFields, emptyTemplate, bytesToBase64 } = await import('../../shared/src/index.ts');
 
 type Call = { method: string; payload: any };
@@ -234,4 +236,22 @@ test('fix a value: options for dropdowns and checkboxes', async () => {
   await bot.handleUpdate(tap(42, tick[0]!.callback_data) as any);
   form = await filledForm(sent()[0]!);
   assert.equal(form.getCheckBox('Approved').isChecked(), true);
+});
+
+test('preview picture of page 1 carries the card, then the PDF follows', async () => {
+  config.preview = true;
+  try {
+    const bot = makeBot();
+    await bot.handleUpdate(pdfMsg(42, 'Picture Job') as any);
+    const photo = sent('sendPhoto')[0]!;
+    const png = photo.payload.photo.source as Buffer;
+    assert.equal(png.subarray(1, 4).toString(), 'PNG');
+    assert.match(photo.payload.caption, /Picture Job\.pdf/);
+    assert.ok(buttons(photo).some((b) => b.text.startsWith('✏️')));
+    const pdf = sent()[0]!;
+    assert.equal(pdf.payload.document.filename, 'Picture Job.pdf');
+    assert.ok(calls.indexOf(photo) < calls.indexOf(pdf), 'picture first, then the file');
+  } finally {
+    config.preview = false;
+  }
 });

@@ -39,6 +39,8 @@ export const config = {
   flatten: bool(process.env.FLATTEN),
   stripXmp: bool(process.env.STRIP_XMP) ?? true,
   titleFromJobName: bool(process.env.TITLE_FROM_JOB_NAME) ?? false,
+  /** send a picture of page 1 with the result */
+  preview: bool(process.env.PREVIEW) ?? true,
   metadata: {
     author: meta('PDF_AUTHOR', 'Alex'),
     creator: meta('PDF_CREATOR'),
