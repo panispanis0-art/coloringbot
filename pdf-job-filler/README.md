@@ -106,6 +106,9 @@ Using it:
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 - The PDF comes back with a **picture of the filled page 1** (check it without opening anything) and a **result card**: every field with its value (missing ones marked ❌) and buttons
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
+- **⚡ Autopilot naming**: pick the same kind of name twice (e.g. *Client - Order no.*) and the bot offers to do it
+  for you; from then on a PDF is filled the moment you send it. Or set it yourself:
+  `/autoname {ClientName} - {date}` (`{file}`, `{date}` and any field name work), `/autoname off` to stop.
 - **📤 Share anywhere**: *Send to a chat* on the result card, or type `@YourBot` in any chat to pick one of your
   filled PDFs and send it there (type part of the name to filter). One-time setup: in @BotFather send `/setinline`,
   choose your bot, enter a placeholder like `Job name…`. Only you see your PDFs.
@@ -130,6 +133,7 @@ Using it:
 | `/start`, `/help` | how to use it |
 | `/write <Job Name>` | as the caption of the source PDF, or as a reply to a PDF you sent before → returns `<Job Name>.pdf` |
 | `/history` | your last 10 jobs; tap one to get its PDF again (then rename / fix / flatten as usual) |
+| `/autoname` | show / set / stop automatic Job Names, e.g. `/autoname {ClientName} - {OrderNumber}` |
 | `/templates` | your template library with 🔍 details and 🗑 delete buttons. Send a template `.json` to add it (same template again = update) |
 
 The bot uses the template's *Flatten by default* unless `FLATTEN=true/false` is set. Metadata comes from `.env`

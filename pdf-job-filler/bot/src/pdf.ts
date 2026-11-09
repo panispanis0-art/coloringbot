@@ -4,6 +4,7 @@ import {
   applyMappings,
   extractSource,
   fillForm,
+  formatDate,
   listFormFields,
   type FormFieldInfo,
   parseTemplate,
@@ -214,23 +215,49 @@ export async function fillJob(sourceBytes: Uint8Array, jobName: string): Promise
 /** Field names that make good Job Names, best first. */
 const NAME_HINTS = [/job|project/i, /client|customer|company|name/i, /order|ref|number|invoice/i, /site|address/i];
 
-/** Up to 3 Job Name ideas taken from the PDF itself, best first. */
-export function suggestJobNames(prepared: Prepared, fileName?: string): string[] {
-  const out: string[] = [];
-  const add = (s: string | undefined) => {
-    const v = (s ?? '').replace(/\s+/g, ' ').trim();
-    if (v && v.length <= 48 && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+export interface NameIdea {
+  name: string;
+  /** how the name was made, e.g. "{ClientName} - {OrderNumber}" (for autopilot) */
+  pattern: string;
+}
+
+/** Up to 3 Job Name ideas taken from the PDF itself, best first, with the pattern behind each. */
+export function nameIdeas(prepared: Prepared, fileName?: string): NameIdea[] {
+  const out: NameIdea[] = [];
+  const add = (name: string | undefined, pattern: string) => {
+    const v = (name ?? '').replace(/\s+/g, ' ').trim();
+    if (v && v.length <= 48 && !out.some((o) => o.name.toLowerCase() === v.toLowerCase())) out.push({ name: v, pattern });
   };
   const ranked = prepared.template.mappings
     .filter((m) => m.fieldType === 'text' && m.rule.type !== 'jobName')
-    .map((m) => ({ rank: NAME_HINTS.findIndex((re) => re.test(m.fieldName)), value: prepared.values[m.fieldName] }))
-    .filter((x): x is { rank: number; value: string } => x.rank >= 0 && !!x.value && !x.value.includes('\n'))
-    .sort((a, b) => a.rank - b.rank)
-    .map((x) => x.value);
-  if (ranked.length >= 2) add(`${ranked[0]} - ${ranked[1]}`);
-  for (const v of ranked) add(v);
-  add(fileName?.replace(/\.pdf$/i, '').replace(/[_]+/g, ' '));
+    .map((m) => ({ rank: NAME_HINTS.findIndex((re) => re.test(m.fieldName)), field: m.fieldName, value: prepared.values[m.fieldName] }))
+    .filter((x): x is { rank: number; field: string; value: string } => x.rank >= 0 && !!x.value && !x.value.includes('\n'))
+    .sort((a, b) => a.rank - b.rank);
+  const [a, b] = ranked;
+  if (a && b) add(`${a.value} - ${b.value}`, `{${a.field}} - {${b.field}}`);
+  for (const x of ranked) add(x.value, `{${x.field}}`);
+  add(fileName?.replace(/\.pdf$/i, '').replace(/[_]+/g, ' '), '{file}');
   return out.slice(0, 3);
+}
+
+export function suggestJobNames(prepared: Prepared, fileName?: string): string[] {
+  return nameIdeas(prepared, fileName).map((i) => i.name);
+}
+
+/** "{ClientName} - {OrderNumber}" -> "Maria Popescu - WO-1". Also {file} and {date}. Empty fields are left out neatly. */
+export function applyNamePattern(pattern: string, prepared: Prepared, fileName = ''): string {
+  const vals: Record<string, string | undefined> = {
+    ...prepared.values,
+    file: fileName.replace(/\.pdf$/i, '').replace(/[_]+/g, ' '),
+    date: formatDate(new Date()),
+  };
+  const filled = pattern.replace(/\{([^}]+)\}/g, (_, k: string) => (vals[k.trim()] ?? '').replace(/\s+/g, ' ').trim());
+  // tidy separators left behind by empty fields: "Maria -  - " -> "Maria"
+  return filled
+    .replace(/(\s*[-–—_,/|·]\s*){2,}/g, (m) => m.match(/\s*[-–—_,/|·]\s*/)![0])
+    .replace(/^\s*[-–—_,/|·]\s*|\s*[-–—_,/|·]\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function templateSummary(t: Template): string {

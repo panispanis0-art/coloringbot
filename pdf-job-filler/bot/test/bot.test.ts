@@ -527,3 +527,47 @@ test('share: "Send to a chat" button and @bot inline search of filled PDFs', asy
   await bot.handleUpdate(inline(42, 'bath') as any);
   assert.equal(calls.find((c) => c.method === 'answerInlineQuery')!.payload.results[0].title, 'Bathroom Jones.pdf');
 });
+
+test('autopilot: same kind of name twice -> offer -> PDFs are filled the moment they arrive', async () => {
+  const bot = makeBot();
+  for (const f of ['src.pdf', 'src2.pdf']) {
+    calls = [];
+    await bot.handleUpdate(msg(42, { document: doc(f) }) as any);
+    await bot.handleUpdate(tap(42, buttons(sent('sendMessage').at(-1))[0]!.callback_data) as any);
+  }
+  const offer = sent('sendMessage').at(-1)!;
+  assert.match(offer.payload.text, /named the last 2 jobs the same way: \{ClientName\} - \{OrderNumber\}/);
+  calls = [];
+  await bot.handleUpdate(tap(42, buttons(offer)[0]!.callback_data) as any);
+  assert.match(lastText(), /Autopilot on/);
+
+  // a bare PDF is now filled straight away
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('src2.pdf') }) as any);
+  assert.equal(sent('sendMessage').length, 0, 'no question asked');
+  assert.equal(sent()[0]!.payload.document.filename, 'John Smith - WO-2026-0152.pdf');
+  assert.match(sent()[0]!.payload.caption, /named automatically/);
+
+  // /autoname shows it, sets a custom pattern, and turns it off
+  calls = [];
+  await bot.handleUpdate(text(42, '/autoname') as any);
+  assert.match(lastText(), /autopilot ON — \{ClientName\} - \{OrderNumber\}/);
+  await bot.handleUpdate(text(42, '/autoname {OrderNumber} {ClientName} {Nope}') as any);
+  assert.match(lastText(), /Your last PDF would be: WO-2026-0152 John Smith/);
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('src.pdf') }) as any);
+  assert.equal(sent()[0]!.payload.document.filename, 'WO-2026-0147 Maria Popescu.pdf');
+  await bot.handleUpdate(text(42, '/autoname off') as any);
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('src.pdf') }) as any);
+  assert.match(lastText(), /What's the Job Name/);
+});
+
+test('name patterns tidy up empty fields', async () => {
+  const { applyNamePattern } = await import('../src/pdf.ts');
+  const prepared: any = { values: { A: 'Maria', B: '', C: 'WO-1' } };
+  assert.equal(applyNamePattern('{A} - {B} - {C}', prepared), 'Maria - WO-1');
+  assert.equal(applyNamePattern('{B} - {A}', prepared), 'Maria');
+  assert.equal(applyNamePattern('{B}', prepared), '');
+  assert.equal(applyNamePattern('{file} {A}', prepared, 'scan_01.pdf'), 'scan 01 Maria');
+});

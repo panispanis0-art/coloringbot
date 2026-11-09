@@ -19,6 +19,8 @@ export interface Job {
   walkTotal?: number;
   /** fields the user chose to leave empty */
   skipped?: string[];
+  /** the Job Name came from the autopilot pattern */
+  autoNamed?: boolean;
   /** the last PDF sent for this job (Telegram file id), for sharing */
   result?: { fileId: string; fileName: string } | undefined;
   /** result filled ahead for the top suggestion (see fillAhead) */
@@ -33,6 +35,9 @@ export interface Awaiting {
   field?: string;
 }
 const awaiting = new Map<number, Awaiting>();
+
+/** template id -> the naming pattern picked last time and how many times in a row (autopilot offer) */
+export const habits = new Map<string, { pattern: string; count: number }>();
 
 export function newJobId(): string {
   let id: string;
@@ -74,4 +79,5 @@ export function jobAwaitingName(userId: number): Job | undefined {
 export function clearJobs() {
   jobs.clear();
   awaiting.clear();
+  habits.clear();
 }

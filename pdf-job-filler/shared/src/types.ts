@@ -156,6 +156,8 @@ export interface Template {
   mappings: FieldMapping[];
   options: {
     flatten: boolean;
+    /** Telegram bot: name jobs automatically, e.g. "{ClientName} - {OrderNumber}" */
+    jobNamePattern?: string | undefined;
   };
 }
 

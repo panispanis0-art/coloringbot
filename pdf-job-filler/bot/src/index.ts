@@ -15,6 +15,7 @@ await bot.telegram.setMyCommands([
   { command: 'write', description: 'Fill the form: /write <Job Name> + source PDF' },
   { command: 'templates', description: 'Your templates' },
   { command: 'history', description: 'Your last jobs' },
+  { command: 'autoname', description: 'Name jobs automatically' },
   { command: 'help', description: 'How to use the bot' },
   { command: 'start', description: 'Start' },
 ]).catch((e) => console.warn('setMyCommands failed:', e.message));

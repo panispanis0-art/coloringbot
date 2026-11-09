@@ -3,7 +3,9 @@ import { message } from 'telegraf/filters';
 import { zipSync } from 'fflate';
 import { config } from './config.ts';
 import {
+  applyNamePattern,
   deleteTemplate,
+  nameIdeas,
   listTemplates,
   prepareJob,
   renderJob,
@@ -16,6 +18,7 @@ import {
 import { renderPreview } from './preview.ts';
 import { allSegments, learnRule } from './teach.ts';
 import { findJob, history, saveJob } from './store.ts';
+import { habits } from './jobs.ts';
 import { addJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
 export const HELP = [
@@ -30,6 +33,7 @@ export const HELP = [
   '/templates — your templates (I pick the best one for each PDF).',
   '   Send a template .json (exported from the web app) to add it.',
   '/history — your last jobs, tap one to get its PDF again.',
+  '/autoname — name jobs automatically, e.g. /autoname {ClientName} - {date}',
   '/help — this message.',
 ].join('\n');
 
@@ -202,7 +206,8 @@ async function finish(ctx: Context, job: Job, jobName: string) {
     const ahead = job.ahead?.key === outputKey(job, job.jobName) ? job.ahead.promise : undefined;
     job.ahead = undefined;
     const { res, picture, ms } = await (ahead ?? produce(job, job.jobName));
-    const speed = ahead ? '⚡ ready before you tapped' : `⚡ ${ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`}`;
+    let speed = ahead ? '⚡ ready before you tapped' : `⚡ ${ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`}`;
+    if (job.autoNamed) speed += ' · named automatically (🔁 Rename to change)';
     const card = {
       caption: resultCaption(job, res.fileName, res.values, res.warnings, `<i>${speed}</i>`),
       parse_mode: 'HTML' as const,
@@ -316,6 +321,34 @@ async function showLibrary(ctx: Context) {
   );
 }
 
+/* ---------- autopilot naming ---------- */
+
+/** The Job Name from the template's pattern, or undefined when there is none / it comes out empty. */
+function autoName(job: Job): string | undefined {
+  const pattern = job.prepared.template.options.jobNamePattern;
+  if (!pattern) return undefined;
+  const name = applyNamePattern(pattern, job.prepared, job.sourceName);
+  return name || undefined;
+}
+
+/** No name given: use the autopilot pattern if there is one, else ask. */
+async function nameOrAsk(ctx: Context, job: Job) {
+  const auto = autoName(job);
+  if (!auto) return askName(ctx, job);
+  job.autoNamed = true;
+  return finish(ctx, job, auto);
+}
+
+
+async function setNamePattern(templateId: string, pattern: string | undefined) {
+  const hit = (await listTemplates()).find((t) => t.template.id === templateId);
+  if (!hit) throw new Error('That template is no longer in the library.');
+  const t = { ...hit.template, options: { ...hit.template.options, jobNamePattern: pattern }, updatedAt: new Date().toISOString() };
+  if (!pattern) delete t.options.jobNamePattern;
+  await saveTemplate(JSON.stringify(t));
+  return t;
+}
+
 /* ---------- teach: tap the value in the PDF, the template learns the rule ---------- */
 
 const PER_PAGE = 10;
@@ -398,7 +431,7 @@ async function runBatch({ ctx, docs, caption }: Batch) {
     const job = await startJob(ctx, docs[0]!);
     if (!job) return;
     const name = commandArgs(caption, 'write') ?? (caption.startsWith('/') ? '' : caption);
-    return name ? finish(ctx, job, name) : askName(ctx, job);
+    return name ? finish(ctx, job, name) : nameOrAsk(ctx, job);
   }
   const status = await ctx.reply(`📦 ${docs.length} PDFs — filling them all…`);
   await ctx.sendChatAction('upload_document').catch(() => {});
@@ -410,7 +443,7 @@ async function runBatch({ ctx, docs, caption }: Batch) {
   for (const doc of docs) {
     try {
       const job = await createJob(ctx, doc);
-      let name = job.suggestions[0] ?? job.sourceName.replace(/\.pdf$/i, '');
+      let name = autoName(job) ?? job.suggestions[0] ?? job.sourceName.replace(/\.pdf$/i, '');
       for (let n = 2; used.has(name.toLowerCase()); n++) name = `${job.suggestions[0] ?? 'Job'} (${n})`;
       used.add(name.toLowerCase());
       job.jobName = name;
@@ -585,7 +618,7 @@ export function createBot(token = config.token): Telegraf {
     // caption "/write Name" or simply "Name" = the Job Name
     const name = commandArgs(caption, 'write') ?? (caption.startsWith('/') ? '' : caption);
     if (name) return finish(ctx, job, name);
-    return askName(ctx, job);
+    return nameOrAsk(ctx, job);
   });
 
   // tap on a suggested name
@@ -595,7 +628,65 @@ export function createBot(token = config.token): Telegraf {
     await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (!job || !name) return;
     await ctx.editMessageReplyMarkup(undefined).catch(() => {});
-    return finish(ctx, job, name);
+    job.autoNamed = false;
+    await finish(ctx, job, name);
+    // same kind of name picked again? offer to do it automatically from now on
+    const idx = Number(ctx.match[2]);
+    const idea = nameIdeas(job.prepared, job.sourceName)[idx];
+    const tid = job.prepared.template.id;
+    if (!idea || job.prepared.template.options.jobNamePattern) return;
+    const h = habits.get(tid);
+    const count = h?.pattern === idea.pattern ? h.count + 1 : 1;
+    habits.set(tid, { pattern: idea.pattern, count });
+    if (count >= 2) {
+      habits.delete(tid);
+      return ctx.reply(
+        `💡 You named the last ${count} jobs the same way: ${idea.pattern}\nShall I name jobs like this automatically? Then a PDF is filled the moment you send it.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('⚡ Yes, always name like this', `ap:${job.id}:${idx}`)],
+          [Markup.button.callback('No thanks', `an:${job.id}`)],
+        ]),
+      );
+    }
+  });
+  bot.action(/^ap:(\w+):(\d+)$/, async (ctx) => {
+    const job = await findJob(ctx.match[1]!);
+    const idea = job && nameIdeas(job.prepared, job.sourceName)[Number(ctx.match[2])];
+    await ctx.answerCbQuery().catch(() => {});
+    if (!job || !idea) return;
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    const t = await setNamePattern(job.prepared.template.id, idea.pattern);
+    return ctx.reply(`⚡ Autopilot on for “${t.name}”: jobs are named ${idea.pattern}.\nJust send PDFs now. Change or stop it with /autoname.`);
+  });
+  bot.action(/^an:(\w+)$/, async (ctx) => {
+    await ctx.answerCbQuery('OK, I will keep asking.').catch(() => {});
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+  });
+
+  // /autoname [pattern | off]
+  bot.command('autoname', async (ctx) => {
+    const arg = commandArgs(ctx.message.text, 'autoname') ?? '';
+    const last = (await history(ctx.from.id, 1))[0];
+    const lastJob = last && (await findJob(last.id));
+    const list = await listTemplates();
+    const target = lastJob?.prepared.template ?? list[0]?.template;
+    if (!target) return ctx.reply('No templates yet. Send me a template .json first.');
+    const fields = target.mappings.filter((m) => m.fieldType === 'text').map((m) => `{${m.fieldName}}`);
+    if (!arg) {
+      const now = target.options.jobNamePattern;
+      return ctx.reply(
+        `Template “${target.name}”: ${now ? `⚡ autopilot ON — ${now}` : 'autopilot off (I ask for each name)'}\n\n` +
+          `Set it: /autoname {${fields[0]?.slice(1, -1) ?? 'Field'}} - {date}\nStop it: /autoname off\n\nYou can use: ${[...fields, '{file}', '{date}'].join(' ')}`,
+      );
+    }
+    if (/^(off|stop|none)$/i.test(arg)) {
+      await setNamePattern(target.id, undefined);
+      return ctx.reply(`Autopilot off for “${target.name}”. I will ask for each Job Name again.`);
+    }
+    if (!/\{[^}]+\}/.test(arg)) return ctx.reply('The pattern needs at least one {Field}, e.g. /autoname {ClientName} - {date}');
+    const t = await setNamePattern(target.id, arg);
+    const example = lastJob ? applyNamePattern(arg, { ...lastJob.prepared, template: t }, lastJob.sourceName) : '';
+    return ctx.reply(`⚡ Autopilot on for “${t.name}”: ${arg}${example ? `\nYour last PDF would be: ${example}` : ''}`);
   });
 
   // result card: flattened <-> editable copy
@@ -688,6 +779,7 @@ export function createBot(token = config.token): Telegraf {
     const pending = pendingInput(ctx.from.id);
     if (!pending) return ctx.reply('Send me a source PDF and I will fill the form. /help');
     if (pending.field) return setValue(ctx, pending.job, pending.field, text === '-' ? '' : text);
+    pending.job.autoNamed = false;
     return finish(ctx, pending.job, text);
   });
 
