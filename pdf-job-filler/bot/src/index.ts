@@ -1,5 +1,6 @@
 import { config, checkConfig } from './config.ts';
 import { createBot } from './bot.ts';
+import { warmUp } from './pdf.ts';
 
 const problems = checkConfig();
 if (problems.length) {
@@ -8,6 +9,7 @@ if (problems.length) {
 }
 
 const bot = createBot();
+void warmUp().catch((e) => console.warn('Warm-up skipped:', e.message));
 
 await bot.telegram.setMyCommands([
   { command: 'write', description: 'Fill the form: /write <Job Name> + source PDF' },

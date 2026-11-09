@@ -1,7 +1,7 @@
 import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { config } from './config.ts';
-import { loadTemplate, prepareJob, renderJob, saveTemplate, suggestJobNames, templateSummary } from './pdf.ts';
+import { loadTemplate, prepareJob, renderJob, saveTemplate, suggestJobNames, templateSummary, type Rendered } from './pdf.ts';
 import { renderPreview } from './preview.ts';
 import { addJob, getJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
@@ -74,6 +74,7 @@ async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
 /** Ask for the Job Name: suggestion buttons + "type it" reply box. */
 async function askName(ctx: Context, job: Job) {
   waitForName(job.userId, job.id);
+  fillAhead(job);
   const found = Object.values(job.prepared.values).filter(Boolean).length;
   const buttons = job.suggestions.map((s, i) => [Markup.button.callback(`📝 ${s}`, `jn:${job.id}:${i}`)]);
   await ctx.reply(
@@ -89,7 +90,13 @@ function isFlat(job: Job): boolean {
 }
 
 /** The message under the PDF: every mapped field with its value, missing ones marked. */
-export function resultCaption(job: Job, fileName: string, values: Record<string, string>, warnings: string[]): string {
+export function resultCaption(
+  job: Job,
+  fileName: string,
+  values: Record<string, string>,
+  warnings: string[],
+  footer = '',
+): string {
   const mapped = job.prepared.template.mappings.filter((m) => m.rule.type !== 'skip');
   const missing = mapped.filter((m) => !values[m.fieldName]);
   const head = `✅ <b>${esc(fileName)}</b>\n${mapped.length - missing.length}/${mapped.length} fields filled · ${isFlat(job) ? '🔒 flattened' : '📝 editable'}`;
@@ -99,13 +106,18 @@ export function resultCaption(job: Job, fileName: string, values: Record<string,
     return v ? `• ${esc(m.fieldName)}: <b>${esc(short!.replace(/\n/g, ' / '))}</b>` : `• ${esc(m.fieldName)}: ❌ <i>not found</i>`;
   });
   const warn = warnings.filter((w) => !/is not in this form/.test(w)).map((w) => `⚠️ ${esc(w)}`);
-  let out = [head, '', ...rows, ...(warn.length ? ['', ...warn] : [])].join('\n');
-  // Telegram captions are limited to 1024 characters
-  while (out.length > 1000 && rows.length) {
+  const tail = [...(warn.length ? ['', ...warn] : []), ...(footer ? ['', footer] : [])];
+  let out = [head, '', ...rows, ...tail].join('\n');
+  // Telegram captions are limited to 1024 characters: drop rows (never cut inside a tag)
+  while (out.length > 1024 && rows.length) {
     rows.pop();
-    out = [head, '', ...rows, '…', ...(warn.length ? ['', ...warn] : [])].join('\n');
+    out = [head, '', ...rows, '…', ...tail].join('\n');
   }
-  return out.slice(0, 1024);
+  while (out.length > 1024 && tail.length) {
+    tail.shift();
+    out = [head, '', ...rows, '…', ...tail].join('\n');
+  }
+  return out;
 }
 
 function resultButtons(job: Job) {
@@ -118,14 +130,47 @@ function resultButtons(job: Job) {
   ]);
 }
 
+interface Output {
+  res: Rendered;
+  picture?: Buffer | undefined;
+  /** milliseconds spent filling + drawing */
+  ms: number;
+}
+
+/** Fill the form and draw the preview. */
+async function produce(job: Job, jobName: string): Promise<Output> {
+  const t0 = performance.now();
+  const res = await renderJob({ prepared: job.prepared, jobName, overrides: job.overrides, flatten: isFlat(job) });
+  const picture = config.preview ? await renderPreview(res.bytes).catch((e) => void console.warn('Preview failed:', e)) : undefined;
+  return { res, picture: picture ?? undefined, ms: performance.now() - t0 };
+}
+
+/** Same name + same corrections + same flatten = same output. */
+const outputKey = (job: Job, jobName: string) => JSON.stringify([jobName.trim(), job.overrides, isFlat(job)]);
+
+/** Fill ahead for the most likely Job Name, so tapping it answers instantly. */
+function fillAhead(job: Job) {
+  const name = job.suggestions[0];
+  if (!name) return;
+  const promise = produce(job, name);
+  promise.catch(() => {}); // a failure shows up again on the real request
+  job.ahead = { key: outputKey(job, name), promise };
+}
+
 async function finish(ctx: Context, job: Job, jobName: string) {
   waitForName(job.userId, undefined);
   job.jobName = jobName.trim();
   await ctx.sendChatAction('upload_document').catch(() => {});
   try {
-    const res = await renderJob({ prepared: job.prepared, jobName: job.jobName, overrides: job.overrides, flatten: isFlat(job) });
-    const card = { caption: resultCaption(job, res.fileName, res.values, res.warnings), parse_mode: 'HTML' as const, ...resultButtons(job) };
-    const picture = config.preview ? await renderPreview(res.bytes).catch((e) => void console.warn('Preview failed:', e)) : undefined;
+    const ahead = job.ahead?.key === outputKey(job, job.jobName) ? job.ahead.promise : undefined;
+    job.ahead = undefined;
+    const { res, picture, ms } = await (ahead ?? produce(job, job.jobName));
+    const speed = ahead ? '⚡ ready before you tapped' : `⚡ ${ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`}`;
+    const card = {
+      caption: resultCaption(job, res.fileName, res.values, res.warnings, `<i>${speed}</i>`),
+      parse_mode: 'HTML' as const,
+      ...resultButtons(job),
+    };
     if (picture) {
       // picture of page 1 with the card and buttons, then the PDF itself
       await ctx.replyWithPhoto({ source: picture, filename: 'preview.png' }, card);
@@ -133,7 +178,7 @@ async function finish(ctx: Context, job: Job, jobName: string) {
     } else {
       await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, card);
     }
-    console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${res.warnings.length} warnings)`);
+    console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${Math.round(ms)} ms${ahead ? ', filled ahead' : ''})`);
   } catch (e) {
     console.error(e);
     await ctx.reply(`❌ ${errText(e)}`);

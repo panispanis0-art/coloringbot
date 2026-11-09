@@ -255,3 +255,32 @@ test('preview picture of page 1 carries the card, then the PDF follows', async (
     config.preview = false;
   }
 });
+
+test('speed: the top suggestion is filled ahead, so tapping it is instant', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42) as any);
+  const b = buttons(sent('sendMessage').at(-1));
+  await new Promise((r) => setTimeout(r, 300)); // user thinks for a moment
+  calls = [];
+  const t0 = performance.now();
+  await bot.handleUpdate(tap(42, b[0]!.callback_data) as any);
+  const took = performance.now() - t0;
+  assert.match(sent()[0]!.payload.caption, /ready before you tapped/);
+  assert.ok(took < 100, `tap answered in ${took.toFixed(0)} ms`);
+  // a different name is filled on demand and shows its time
+  calls = [];
+  await bot.handleUpdate(pdfMsg(42) as any);
+  await bot.handleUpdate(text(42, 'Other Name') as any);
+  assert.match(sent()[0]!.payload.caption, /⚡ \d+ ms/);
+});
+
+test('captions never exceed Telegram\'s 1024 characters', async () => {
+  const { resultCaption } = await import('../src/bot.ts');
+  const many = Array.from({ length: 80 }, (_, i) => ({ fieldName: `Field_${i}_with_a_long_name`, fieldType: 'text', rule: { type: 'static', value: 'x' } }));
+  const job: any = { prepared: { template: { mappings: many, options: { flatten: false } } }, overrides: {} };
+  const values = Object.fromEntries(many.map((m) => [m.fieldName, 'a fairly long value that repeats '.repeat(2)]));
+  const cap = resultCaption(job, 'Big.pdf', values, ['w1', 'w2'], '<i>⚡ 12 ms</i>');
+  assert.ok(cap.length <= 1024, String(cap.length));
+  assert.match(cap, /…/);
+  assert.equal((cap.match(/<b>/g) ?? []).length, (cap.match(/<\/b>/g) ?? []).length);
+});

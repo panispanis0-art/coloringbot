@@ -13,6 +13,8 @@ export interface Job {
   overrides: Record<string, string>;
   flatten?: boolean;
   suggestions: string[];
+  /** result filled ahead for the top suggestion (see fillAhead) */
+  ahead?: { key: string; promise: Promise<any> } | undefined;
 }
 
 const MAX_JOBS = 50;

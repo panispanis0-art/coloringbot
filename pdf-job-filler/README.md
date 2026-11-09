@@ -106,6 +106,8 @@ Using it:
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 - The PDF comes back with a **picture of the filled page 1** (check it without opening anything) and a **result card**: every field with its value (missing ones marked ❌) and buttons
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
+- **Fast**: the bot warms up at start, caches the template/form/font, and fills the top suggestion while you
+  are still choosing, so tapping it answers instantly (the card shows ⚡ the time it took).
 - **✏️ Fix a value**: pick a field, type the right value (dropdowns and checkboxes get buttons) and the
   corrected PDF comes straight back.
 

@@ -13,19 +13,31 @@ import {
   type SourceDoc,
   type Template,
 } from '../../shared/src/index.ts';
+import { PDFDocument } from 'pdf-lib';
 import { pdfjs, nodePdfjsOptions } from '../../shared/src/node.ts';
 import { config } from './config.ts';
 
+/** Re-read a file only when it changed on disk (mtime/size). */
+const fileCache = new Map<string, { stamp: string; value: unknown }>();
+async function cachedFile<T>(file: string, load: (bytes: Buffer) => T | Promise<T>): Promise<T> {
+  const st = await fs.stat(file);
+  const stamp = `${st.mtimeMs}:${st.size}`;
+  const hit = fileCache.get(file);
+  if (hit && hit.stamp === stamp) return hit.value as T;
+  const value = await load(await fs.readFile(file));
+  fileCache.set(file, { stamp, value });
+  return value;
+}
+
 export async function loadTemplate(): Promise<Template> {
-  let raw: string;
   try {
-    raw = await fs.readFile(config.templatePath, 'utf8');
-  } catch {
+    return await cachedFile(config.templatePath, (b) => parseTemplate(b.toString('utf8')));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
     throw new Error(
       `No template yet.\nExport one from the web app (Templates → Export) and send the .json file to me with the caption /template.`,
     );
   }
-  return parseTemplate(raw);
 }
 
 export async function saveTemplate(json: string): Promise<Template> {
@@ -37,8 +49,11 @@ export async function saveTemplate(json: string): Promise<Template> {
 
 async function readOptional(p?: string): Promise<Uint8Array | undefined> {
   if (!p) return undefined;
-  return new Uint8Array(await fs.readFile(p));
+  return cachedFile(p, (b) => new Uint8Array(b));
 }
+
+/** Decoded form + its field list, per template version. */
+const formCache = new Map<string, { bytes: Uint8Array; fields: FormFieldInfo[] }>();
 
 /** Step 1: read the source PDF and work out every field value. Fast, no PDF is written yet. */
 export interface Prepared {
@@ -50,14 +65,29 @@ export interface Prepared {
   fields: FormFieldInfo[];
 }
 
-async function loadFormBytes(template: Template): Promise<Uint8Array> {
-  const formBytes =
-    (await readOptional(config.formPath)) ??
-    (template.targetFormBase64 ? base64ToBytes(template.targetFormBase64) : undefined);
-  if (!formBytes) {
+async function loadForm(template: Template): Promise<{ bytes: Uint8Array; fields: FormFieldInfo[] }> {
+  const fromFile = await readOptional(config.formPath);
+  const key = fromFile ? `file:${config.formPath}:${fromFile.length}` : `tpl:${template.id}:${template.updatedAt}`;
+  const hit = formCache.get(key);
+  if (hit && (!fromFile || hit.bytes === fromFile)) return hit;
+  const bytes = fromFile ?? (template.targetFormBase64 ? base64ToBytes(template.targetFormBase64) : undefined);
+  if (!bytes) {
     throw new Error('The template has no form inside. Export it again with "include form", or set FORM_PATH in .env.');
   }
-  return formBytes;
+  const entry = { bytes, fields: await listFormFields(bytes) };
+  formCache.set(key, entry);
+  if (formCache.size > 10) formCache.delete(formCache.keys().next().value!);
+  return entry;
+}
+
+/** Load pdf.js, the template and the form once at start-up so the first job is as fast as the rest. */
+export async function warmUp(): Promise<void> {
+  const t0 = Date.now();
+  const blank = await PDFDocument.create();
+  blank.addPage().drawText('warm up');
+  await extractSource(pdfjs, await blank.save(), nodePdfjsOptions);
+  await loadForm(await loadTemplate()).catch(() => {});
+  console.log(`Warmed up in ${Date.now() - t0} ms`);
 }
 
 export async function prepareJob(sourceBytes: Uint8Array): Promise<Prepared> {
@@ -66,7 +96,7 @@ export async function prepareJob(sourceBytes: Uint8Array): Promise<Prepared> {
   if (!source.fullText.trim()) {
     throw new Error('No text found in this PDF. Is it a scan? Only text-based PDFs work.');
   }
-  const fields = await listFormFields(await loadFormBytes(template));
+  const { fields } = await loadForm(template);
   return { template, source, values: applyMappings(source, template.mappings, {}), fields };
 }
 
@@ -89,7 +119,7 @@ export async function renderJob({ prepared, jobName, overrides = {}, flatten }: 
   const name = jobName.trim();
   if (!name) throw new Error('Job Name is empty.');
   const { template, source } = prepared;
-  const formBytes = await loadFormBytes(template);
+  const { bytes: formBytes } = await loadForm(template);
   const values = { ...applyMappings(source, template.mappings, { jobName: name }), ...overrides };
   const res = await fillForm(formBytes, values, {
     flatten: flatten ?? config.flatten ?? template.options.flatten,
