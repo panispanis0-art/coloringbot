@@ -1,5 +1,7 @@
 # Coloring Book Bot
 
+> This repo also contains **[PDF Job Filler](pdf-job-filler/README.md)** (PDF form filler web app + Telegram bot) in `pdf-job-filler/`.
+
 Makes 100-page printable coloring books for kids and sends them to your Telegram.
 Send **/newbook** for a fresh theme, or **/newbook dinosaurs at the beach** for your own.
 

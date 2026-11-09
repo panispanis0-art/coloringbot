@@ -1,0 +1,34 @@
+{
+  "name": "pdf-job-filler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fill a fillable PDF form from a source PDF using a saved mapping template. Web app (PWA) + Telegram bot.",
+  "workspaces": [
+    "shared",
+    "web",
+    "bot"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "preview": "npm run preview -w web",
+    "bot": "npm run start -w bot",
+    "samples": "tsx scripts/make-samples.ts",
+    "test": "tsx --test shared/test/*.test.ts bot/test/*.test.ts",
+    "typecheck": "tsc -p web/tsconfig.json --noEmit && tsc -p bot/tsconfig.json --noEmit",
+    "export:lovable": "node scripts/export-lovable.mjs"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.0"
+  },
+  "dependencies": {
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.4.0"
+  }
+}
