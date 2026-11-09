@@ -106,6 +106,9 @@ Using it:
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 - The PDF comes back with a **picture of the filled page 1** (check it without opening anything) and a **result card**: every field with its value (missing ones marked ❌) and buttons
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
+- **📤 Share anywhere**: *Send to a chat* on the result card, or type `@YourBot` in any chat to pick one of your
+  filled PDFs and send it there (type part of the name to filter). One-time setup: in @BotFather send `/setinline`,
+  choose your bot, enter a placeholder like `Job name…`. Only you see your PDFs.
 - **Batch**: select several PDFs and send them together. Each is named from its own data, and you get **one ZIP**
   with all filled PDFs, a status line per job (✅ complete / 🧩 N missing / ❌ error) and a button per job.
 - **Several templates**: keep as many as you like. For each PDF the bot tries all of them and uses the one

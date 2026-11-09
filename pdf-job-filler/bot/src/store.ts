@@ -21,6 +21,8 @@ interface Meta {
   skipped?: string[] | undefined;
   templateId: string;
   templateName: string;
+  fileId?: string | undefined;
+  fileName?: string | undefined;
 }
 
 const dirOf = (id: string) => path.join(config.jobsDir, id);
@@ -45,6 +47,8 @@ export async function saveJob(job: Job): Promise<void> {
     skipped: job.skipped,
     templateId: job.prepared.template.id,
     templateName: job.prepared.template.name,
+    fileId: job.result?.fileId,
+    fileName: job.result?.fileName,
   };
   await fs.writeFile(path.join(dir, 'job.json'), JSON.stringify(meta, null, 2));
 }
@@ -78,6 +82,7 @@ export async function findJob(id: string): Promise<Job | undefined> {
       overrides: meta.overrides ?? {},
       ...(meta.flatten !== undefined ? { flatten: meta.flatten } : {}),
       ...(meta.skipped ? { skipped: meta.skipped } : {}),
+      ...(meta.fileId ? { result: { fileId: meta.fileId, fileName: meta.fileName ?? `${meta.jobName}.pdf` } } : {}),
       suggestions: suggestJobNames(prepared, meta.sourceName),
     });
   } catch (e) {
@@ -92,6 +97,8 @@ export interface HistoryEntry {
   sourceName: string;
   templateName: string;
   updatedAt: number;
+  fileId?: string | undefined;
+  fileName?: string | undefined;
 }
 
 /** Newest first. Also removes the oldest jobs beyond the last 200. */
@@ -109,5 +116,13 @@ export async function history(userId: number, limit = 10): Promise<HistoryEntry[
     .slice(0, KEEP)
     .filter((m) => m.userId === userId)
     .slice(0, limit)
-    .map((m) => ({ id: m.id, jobName: m.jobName, sourceName: m.sourceName, templateName: m.templateName, updatedAt: m.updatedAt }));
+    .map((m) => ({
+      id: m.id,
+      jobName: m.jobName,
+      sourceName: m.sourceName,
+      templateName: m.templateName,
+      updatedAt: m.updatedAt,
+      fileId: m.fileId,
+      fileName: m.fileName,
+    }));
 }

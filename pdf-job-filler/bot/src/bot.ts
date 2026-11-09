@@ -163,6 +163,7 @@ function resultButtons(job: Job) {
       Markup.button.callback('🔁 Rename', `rn:${job.id}`),
     ],
     ...(job.prepared.ranking.length > 1 ? [[Markup.button.callback('🔄 Other template', `ot:${job.id}`)]] : []),
+    ...(job.jobName ? [[Markup.button.switchToChat('📤 Send to a chat', job.jobName)]] : []),
   ]);
 }
 
@@ -207,13 +208,17 @@ async function finish(ctx: Context, job: Job, jobName: string) {
       parse_mode: 'HTML' as const,
       ...resultButtons(job),
     };
+    let sentDoc;
     if (picture) {
       // picture of page 1 with the card and buttons, then the PDF itself
       await ctx.replyWithPhoto({ source: picture, filename: 'preview.png' }, card);
-      await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName });
+      sentDoc = await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName });
     } else {
-      await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, card);
+      sentDoc = await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, card);
     }
+    // remember Telegram's copy of the file: sharing it later needs no upload
+    const fileId = (sentDoc as { document?: { file_id?: string } } | undefined)?.document?.file_id;
+    if (fileId) job.result = { fileId, fileName: res.fileName };
     await saveJob(job).catch((e) => console.warn('Could not save job:', e));
     console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${Math.round(ms)} ms${ahead ? ', filled ahead' : ''})`);
   } catch (e) {
@@ -473,6 +478,25 @@ export function createBot(token = config.token): Telegraf {
     const reply = (ctx.message as any).reply_to_message;
     if (reply?.document) return importTemplate(ctx, reply.document);
     return showLibrary(ctx);
+  });
+
+  // "@bot <name>" in any chat: your filled PDFs, ready to send there
+  bot.on('inline_query', async (ctx) => {
+    const q = ctx.inlineQuery.query.trim().toLowerCase();
+    const list = (await history(ctx.from.id, 200)).filter(
+      (h) => h.fileId && (!q || `${h.jobName} ${h.sourceName}`.toLowerCase().includes(q)),
+    );
+    const day = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    await ctx.answerInlineQuery(
+      list.slice(0, 50).map((h) => ({
+        type: 'document' as const,
+        id: h.id,
+        title: h.fileName ?? `${h.jobName}.pdf`,
+        document_file_id: h.fileId!,
+        description: `${h.templateName} · ${day(h.updatedAt)}`,
+      })),
+      { cache_time: 0, is_personal: true },
+    );
   });
 
   bot.command('history', async (ctx) => {

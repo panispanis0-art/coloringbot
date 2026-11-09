@@ -19,6 +19,8 @@ export interface Job {
   walkTotal?: number;
   /** fields the user chose to leave empty */
   skipped?: string[];
+  /** the last PDF sent for this job (Telegram file id), for sharing */
+  result?: { fileId: string; fileName: string } | undefined;
   /** result filled ahead for the top suggestion (see fillAhead) */
   ahead?: { key: string; promise: Promise<any> } | undefined;
 }

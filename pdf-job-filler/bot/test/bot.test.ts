@@ -32,6 +32,9 @@ let msgId = 1000;
 (Telegram.prototype as any).callApi = async function (method: string, payload: any) {
   calls.push({ method, payload });
   if (method === 'getFile') return { file_id: payload.file_id, file_path: payload.file_id };
+  if (method === 'sendDocument') {
+    return { message_id: ++msgId, date: 0, chat: { id: payload.chat_id, type: 'private' }, document: { file_id: `FILE_${msgId}`, file_unique_id: `U${msgId}` } };
+  }
   if (method.startsWith('send')) return { message_id: ++msgId, date: 0, chat: { id: payload.chat_id, type: 'private' } };
   return true;
 };
@@ -66,7 +69,8 @@ export const tap = (user: number, data: string) => ({
 
 const sent = (method = 'sendDocument') => calls.filter((c) => c.method === method);
 const lastText = () => [...calls].reverse().find((c) => c.method === 'sendMessage')?.payload.text as string;
-const buttons = (c: Call | undefined) => (c?.payload.reply_markup?.inline_keyboard ?? []).flat() as { text: string; callback_data: string }[];
+const buttons = (c: Call | undefined) =>
+  (c?.payload.reply_markup?.inline_keyboard ?? []).flat() as { text: string; callback_data: string; switch_inline_query?: string }[];
 
 async function filledForm(c: Call) {
   return (await PDFDocument.load(c.payload.document.source)).getForm();
@@ -183,7 +187,7 @@ test('result card: values, missing fields, flatten toggle, rename', async () => 
   assert.match(first.payload.caption, /3\/3 fields filled · 📝 editable/);
   assert.match(first.payload.caption, /ClientName: <b>Maria Popescu<\/b>/);
   const b = buttons(first);
-  assert.deepEqual(b.map((x) => x.text), ['✏️ Fix a value', '🔒 Flattened copy', '🔁 Rename']);
+  assert.deepEqual(b.map((x) => x.text), ['✏️ Fix a value', '🔒 Flattened copy', '🔁 Rename', '📤 Send to a chat']);
 
   calls = [];
   await bot.handleUpdate(tap(42, b[1]!.callback_data) as any);
@@ -493,4 +497,33 @@ test('teach: pick the value once, every next PDF gets it', async () => {
   await bot.handleUpdate(msg(42, { document: doc('src2.pdf'), caption: 'Next Job' }) as any);
   form = await filledForm(sent()[0]!);
   assert.equal(form.getTextField('Phone').getText(), '+44 20 7946 0000');
+});
+
+test('share: "Send to a chat" button and @bot inline search of filled PDFs', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'Kitchen Smith') as any);
+  await bot.handleUpdate(pdfMsg(42, 'Bathroom Jones') as any);
+  const share = buttons(sent()[0]).find((b) => b.text.startsWith('📤'))!;
+  assert.equal(share.switch_inline_query, 'Kitchen Smith');
+
+  const inline = (user: number, query: string) => ({ update_id: n++, inline_query: { id: 'q' + n, from: from(user), query, offset: '' } });
+  calls = [];
+  await bot.handleUpdate(inline(42, 'kitchen') as any);
+  const answer = calls.find((c) => c.method === 'answerInlineQuery')!;
+  assert.equal(answer.payload.results.length, 1);
+  assert.equal(answer.payload.results[0].title, 'Kitchen Smith.pdf');
+  assert.match(answer.payload.results[0].document_file_id, /^FILE_/);
+  assert.equal(answer.payload.is_personal, true);
+
+  calls = [];
+  await bot.handleUpdate(inline(42, '') as any);
+  assert.equal(calls.find((c) => c.method === 'answerInlineQuery')!.payload.results.length, 2);
+
+  // survives a restart (file id is saved with the job), strangers get nothing
+  clearJobs();
+  calls = [];
+  await bot.handleUpdate(inline(7, '') as any);
+  assert.equal(calls.length, 0);
+  await bot.handleUpdate(inline(42, 'bath') as any);
+  assert.equal(calls.find((c) => c.method === 'answerInlineQuery')!.payload.results[0].title, 'Bathroom Jones.pdf');
 });
