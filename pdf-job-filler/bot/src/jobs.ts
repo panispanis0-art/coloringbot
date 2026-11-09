@@ -21,6 +21,8 @@ export interface Job {
   walkTotal?: number;
   /** fields the user chose to leave empty */
   skipped?: string[];
+  /** the user's message with the source PDF (for 👀 / 👍 reactions) */
+  messageId?: number;
   /** the Job Name came from the autopilot pattern */
   autoNamed?: boolean;
   /** the last PDF sent for this job (Telegram file id), for sharing */

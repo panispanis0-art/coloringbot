@@ -120,6 +120,8 @@ Using it:
   instantly (no re-fill, no upload) or a fresh job. A caption with a Job Name skips the check.
 - **Nothing expires**: jobs are saved in `bot/data/jobs/` (source PDF + your corrections), so buttons on old
   messages keep working after a restart. The last 200 jobs are kept.
+- **Live status**: the bot reacts to your PDF (👀 working, 👍 delivered, 😢 failed). Only when something is slow
+  (big PDF, slow network) a status line appears and updates in place (📥 → 🔎 → ✍️ → 🖼 → 📤); batches count up live.
 - **Fast**: the bot warms up at start, caches the template/form/font, and fills the top suggestion while you
   are still choosing, so tapping it answers instantly (the card shows ⚡ the time it took).
 - **🧩 Fill N missing**: when fields were not found, the bot asks for them one after another (type, tap an

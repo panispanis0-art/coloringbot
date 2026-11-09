@@ -16,6 +16,7 @@ import {
   type Rendered,
 } from './pdf.ts';
 import { renderPreview } from './preview.ts';
+import { Progress, react } from './progress.ts';
 import { allSegments, learnRule } from './teach.ts';
 import { findDuplicate, findJob, hashOf, history, saveJob } from './store.ts';
 import { habits } from './jobs.ts';
@@ -63,9 +64,10 @@ async function download(ctx: Context, d: Doc): Promise<Uint8Array> {
 
 /** Download + read a source PDF into a Job. Replies with the error and returns undefined on failure. */
 /** Download + read a source PDF into a Job (throws on failure). */
-async function createJob(ctx: Context, doc: Doc): Promise<Job> {
+async function createJob(ctx: Context, doc: Doc, progress?: Progress): Promise<Job> {
   if (!isPdf(doc)) throw new Error(`${doc.file_name ?? 'That file'} is not a PDF.`);
   const sourceBytes = await download(ctx, doc);
+  await progress?.step(`🔎 Reading ${doc.file_name ?? 'the PDF'}…`);
   const prepared = await prepareJob(sourceBytes);
   const sourceName = doc.file_name ?? 'source.pdf';
   const job = addJob({
@@ -79,6 +81,7 @@ async function createJob(ctx: Context, doc: Doc): Promise<Job> {
     createdAt: Date.now(),
     overrides: {},
     suggestions: suggestJobNames(prepared, sourceName),
+    ...(ctx.message && 'document' in ctx.message ? { messageId: ctx.message.message_id } : {}),
   });
   await saveJob(job).catch((e) => console.warn('Could not save job:', e));
   return job;
@@ -86,13 +89,20 @@ async function createJob(ctx: Context, doc: Doc): Promise<Job> {
 
 /** Download + read a source PDF into a Job. Replies with the error and returns undefined on failure. */
 async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
+  const own = !!ctx.message && 'document' in ctx.message;
+  if (own) await react(ctx, '👀');
   await ctx.sendChatAction('typing').catch(() => {});
+  const progress = new Progress(ctx, `📥 Downloading ${doc.file_name ?? 'the PDF'}…`);
   try {
-    return await createJob(ctx, doc);
+    return await createJob(ctx, doc, progress);
   } catch (e) {
     console.error(e);
+    await progress.done();
+    if (own) await react(ctx, '😢');
     await ctx.reply(`❌ ${errText(e)}`);
     return undefined;
+  } finally {
+    await progress.done();
   }
 }
 
@@ -180,9 +190,10 @@ interface Output {
 }
 
 /** Fill the form and draw the preview. */
-async function produce(job: Job, jobName: string, withPreview = config.preview): Promise<Output> {
+async function produce(job: Job, jobName: string, withPreview = config.preview, progress?: Progress): Promise<Output> {
   const t0 = performance.now();
   const res = await renderJob({ prepared: job.prepared, jobName, overrides: job.overrides, flatten: isFlat(job) });
+  if (withPreview) await progress?.step('🖼 Drawing the preview…');
   const picture = withPreview ? await renderPreview(res.bytes).catch((e) => void console.warn('Preview failed:', e)) : undefined;
   return { res, picture: picture ?? undefined, ms: performance.now() - t0 };
 }
@@ -203,10 +214,12 @@ async function finish(ctx: Context, job: Job, jobName: string) {
   waitForName(job.userId, undefined);
   job.jobName = jobName.trim();
   await ctx.sendChatAction('upload_document').catch(() => {});
+  const progress = new Progress(ctx, '✍️ Filling the form…');
   try {
     const ahead = job.ahead?.key === outputKey(job, job.jobName) ? job.ahead.promise : undefined;
     job.ahead = undefined;
-    const { res, picture, ms } = await (ahead ?? produce(job, job.jobName));
+    const { res, picture, ms } = await (ahead ?? produce(job, job.jobName, config.preview, progress));
+    await progress.step('📤 Sending…');
     let speed = ahead ? '⚡ ready before you tapped' : `⚡ ${ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`}`;
     if (job.autoNamed) speed += ' · named automatically (🔁 Rename to change)';
     const card = {
@@ -225,10 +238,14 @@ async function finish(ctx: Context, job: Job, jobName: string) {
     // remember Telegram's copy of the file: sharing it later needs no upload
     const fileId = (sentDoc as { document?: { file_id?: string } } | undefined)?.document?.file_id;
     if (fileId) job.result = { fileId, fileName: res.fileName };
+    await progress.done();
+    if (job.messageId) await react(ctx, '👍', job.messageId);
     await saveJob(job).catch((e) => console.warn('Could not save job:', e));
     console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${Math.round(ms)} ms${ahead ? ', filled ahead' : ''})`);
   } catch (e) {
     console.error(e);
+    await progress.done();
+    if (job.messageId) await react(ctx, '😢', job.messageId);
     await ctx.reply(`❌ ${errText(e)}`);
   }
 }
@@ -408,6 +425,8 @@ async function teach(ctx: Context, job: Job, fieldIndex: number, segIndex: numbe
 interface Batch {
   ctx: Context;
   docs: Doc[];
+  /** the user's album messages, for 👀 / 👍 reactions */
+  messageIds: number[];
   caption: string;
   timer?: NodeJS.Timeout;
 }
@@ -416,8 +435,13 @@ const batches = new Map<string, Batch>();
 /** Telegram delivers an album as separate messages: collect them for a moment, then run them together. */
 function queueBatch(ctx: Context, groupId: string, doc: Doc, caption: string) {
   const key = `${ctx.from!.id}:${groupId}`;
-  const b = batches.get(key) ?? { ctx, docs: [], caption: '' };
+  const b = batches.get(key) ?? { ctx, docs: [], caption: '', messageIds: [] };
   b.docs.push(doc);
+  const mid = (ctx.message as { message_id?: number } | undefined)?.message_id;
+  if (mid) {
+    b.messageIds.push(mid);
+    void react(ctx, '👀', mid);
+  }
   if (caption) b.caption = caption;
   clearTimeout(b.timer);
   b.timer = setTimeout(() => {
@@ -427,7 +451,7 @@ function queueBatch(ctx: Context, groupId: string, doc: Doc, caption: string) {
   batches.set(key, b);
 }
 
-async function runBatch({ ctx, docs, caption }: Batch) {
+async function runBatch({ ctx, docs, caption, messageIds }: Batch) {
   if (docs.length === 1) {
     const job = await startJob(ctx, docs[0]!);
     if (!job) return;
@@ -441,7 +465,10 @@ async function runBatch({ ctx, docs, caption }: Batch) {
   const zipFiles: Record<string, Uint8Array> = {};
   const lines: string[] = [];
   const done: Job[] = [];
-  for (const doc of docs) {
+  for (const [i, doc] of docs.entries()) {
+    await ctx.telegram
+      .editMessageText(status.chat.id, status.message_id, undefined, `📦 Filling ${i + 1}/${docs.length} — ${doc.file_name ?? 'PDF'}…`)
+      .catch(() => {});
     try {
       const job = await createJob(ctx, doc);
       let name = autoName(job) ?? job.suggestions[0] ?? job.sourceName.replace(/\.pdf$/i, '');
@@ -459,6 +486,7 @@ async function runBatch({ ctx, docs, caption }: Batch) {
     }
   }
   await ctx.telegram.deleteMessage(status.chat.id, status.message_id).catch(() => {});
+  for (const id of messageIds) await react(ctx, done.length ? '👍' : '😢', id);
   if (!done.length) return ctx.reply(`❌ None of the ${docs.length} files could be filled:\n${lines.join('\n')}`, { parse_mode: 'HTML' });
   const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
   const zipName = `Jobs ${stamp} (${done.length}).zip`;

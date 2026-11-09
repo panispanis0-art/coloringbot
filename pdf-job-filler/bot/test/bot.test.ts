@@ -41,6 +41,7 @@ let msgId = 1000;
 
 globalThis.fetch = (async (url: any) => {
   const key = String(url).split('/').pop()!;
+  if (key.startsWith('slow')) await new Promise((r) => setTimeout(r, 60)); // a slow network
   const body = files[key];
   return body ? new Response(body as BodyInit) : new Response('nope', { status: 404 });
 }) as typeof fetch;
@@ -600,4 +601,46 @@ test('duplicate guard: the same PDF again offers the earlier result instantly', 
   calls = [];
   await bot.handleUpdate(pdfMsg(42, 'Second Copy') as any);
   assert.equal(sent()[0]!.payload.document.filename, 'Second Copy.pdf');
+});
+
+test('live status: reactions on the PDF, a status line only when slow', async () => {
+  const bot = makeBot();
+  files['slow.pdf'] = files['src2.pdf']!;
+  // fast job: reactions, but no status line
+  await bot.handleUpdate(pdfMsg(42, 'Fast One') as any);
+  const reactions = () => calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction[0].emoji);
+  assert.deepEqual(reactions(), ['👀', '👍']);
+  assert.equal(sent('sendMessage').length, 0);
+
+  // slow download: the status line appears, moves through the steps and is removed
+  config.progressDelayMs = 20;
+  try {
+    calls = [];
+    await bot.handleUpdate(msg(42, { document: doc('slow.pdf'), caption: 'Slow One' }) as any);
+    const status = sent('sendMessage')[0]!;
+    assert.match(status.payload.text, /📥 Downloading slow\.pdf/);
+    const steps = calls.filter((c) => c.method === 'editMessageText').map((c) => c.payload.text);
+    assert.ok(steps.includes('🔎 Reading slow.pdf…'), steps.join(' | '));
+    assert.ok(calls.some((c) => c.method === 'deleteMessage'), 'status line removed');
+    assert.equal(sent()[0]!.payload.document.filename, 'Slow One.pdf');
+    assert.deepEqual(reactions(), ['👀', '👍']);
+  } finally {
+    config.progressDelayMs = 700;
+  }
+
+  // failure: 😢
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('nothere.pdf') }) as any);
+  assert.deepEqual(reactions(), ['👀', '😢']);
+  assert.match(lastText(), /❌ Download failed/);
+});
+
+test('batch status counts up live', async () => {
+  const bot = makeBot();
+  for (const f of ['src.pdf', 'src2.pdf']) await bot.handleUpdate(msg(42, { document: doc(f), media_group_id: 'g9' }) as any);
+  await new Promise((r) => setTimeout(r, 400));
+  const steps = calls.filter((c) => c.method === 'editMessageText').map((c) => c.payload.text);
+  assert.deepEqual(steps, ['📦 Filling 1/2 — src.pdf…', '📦 Filling 2/2 — src2.pdf…']);
+  const r = calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction[0].emoji);
+  assert.deepEqual(r, ['👀', '👀', '👍', '👍']);
 });

@@ -48,6 +48,8 @@ export const config = {
   preview: bool(process.env.PREVIEW) ?? true,
   /** how long to wait for the rest of an album of PDFs */
   batchWaitMs: Number(process.env.BATCH_WAIT_MS) || 1500,
+  /** show a live status line only for work that takes longer than this */
+  progressDelayMs: Number(process.env.PROGRESS_DELAY_MS ?? 700),
   metadata: {
     author: meta('PDF_AUTHOR', 'Alex'),
     creator: meta('PDF_CREATOR'),
