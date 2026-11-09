@@ -99,12 +99,16 @@ Templates live in the browser of each device. Move them with **Templates → Exp
 5. Double-click **`run-bot.bat`** (or `run-all.bat` for web + bot). Keep the window open; the bot works while
    your PC is on.
 
-Commands:
+Using it:
+
+- **Just send the source PDF.** The bot reads it straight away and asks for the Job Name with one-tap
+  suggestions taken from the PDF itself (client, order number, file name…). Tap one or type your own.
+- Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 
 | Command | |
 |---|---|
 | `/start`, `/help` | how to use it |
-| `/write <Job Name>` | as the **caption** of the source PDF, or as a **reply** to a PDF you sent before → returns `<Job Name>.pdf` |
+| `/write <Job Name>` | as the caption of the source PDF, or as a reply to a PDF you sent before → returns `<Job Name>.pdf` |
 | `/template` | shows the active template and its rules; send a `.json` with caption `/template` to replace it |
 
 The bot uses the template's *Flatten by default* unless `FLATTEN=true/false` is set. Metadata comes from `.env`

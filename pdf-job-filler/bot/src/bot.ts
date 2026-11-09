@@ -1,15 +1,17 @@
-import { Telegraf, type Context } from 'telegraf';
+import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { config } from './config.ts';
-import { fillJob, loadTemplate, saveTemplate, templateSummary } from './pdf.ts';
+import { loadTemplate, prepareJob, renderJob, saveTemplate, suggestJobNames, templateSummary } from './pdf.ts';
+import { addJob, getJob, jobAwaitingName, newJobId, waitForName, type Job } from './jobs.ts';
 
 export const HELP = [
   'PDF Job Filler bot',
   '',
-  '/write <Job Name> — fill the form from a source PDF.',
-  '   • send the source PDF with the caption: /write My Job',
-  '   • or reply to a PDF you already sent with: /write My Job',
-  '   You get back "My Job.pdf".',
+  '📄 Just send me the source PDF. I read it and ask for the Job Name —',
+  '   tap a suggestion or type one. You get back "<Job Name>.pdf".',
+  '   Shortcut: put the Job Name in the caption of the PDF.',
+  '',
+  '/write <Job Name> — as caption of a PDF, or as a reply to a PDF.',
   '/template — show the active template.',
   '   Send a template .json (exported from the web app) with the caption /template to replace it.',
   '/help — this message.',
@@ -29,6 +31,7 @@ export function commandArgs(text: string | undefined, command: string): string |
 }
 
 const isPdf = (d: Doc) => d.mime_type === 'application/pdf' || /\.pdf$/i.test(d.file_name ?? '');
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 async function download(ctx: Context, d: Doc): Promise<Uint8Array> {
   if (d.file_size && d.file_size > 20 * 1024 * 1024) throw new Error('File is over 20 MB, Telegram bots cannot download it.');
@@ -38,26 +41,61 @@ async function download(ctx: Context, d: Doc): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
-async function write(ctx: Context, jobName: string, doc: Doc | undefined) {
-  if (!jobName) return ctx.reply('Add a Job Name: /write <Job Name>');
-  if (!doc) return ctx.reply('Attach the source PDF with this caption, or reply to a PDF with /write <Job Name>.');
-  if (!isPdf(doc)) return ctx.reply('That file is not a PDF.');
+/** Download + read a source PDF into a Job. Replies with the error and returns undefined on failure. */
+async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
+  if (!isPdf(doc)) {
+    await ctx.reply('That file is not a PDF.');
+    return undefined;
+  }
+  await ctx.sendChatAction('typing').catch(() => {});
+  try {
+    const sourceBytes = await download(ctx, doc);
+    const prepared = await prepareJob(sourceBytes);
+    const sourceName = doc.file_name ?? 'source.pdf';
+    return addJob({
+      id: newJobId(),
+      userId: ctx.from!.id,
+      chatId: ctx.chat!.id,
+      sourceName,
+      sourceBytes,
+      prepared,
+      createdAt: Date.now(),
+      overrides: {},
+      suggestions: suggestJobNames(prepared, sourceName),
+    });
+  } catch (e) {
+    console.error(e);
+    await ctx.reply(`❌ ${errText(e)}`);
+    return undefined;
+  }
+}
+
+/** Ask for the Job Name: suggestion buttons + "type it" reply box. */
+async function askName(ctx: Context, job: Job) {
+  waitForName(job.userId, job.id);
+  const found = Object.values(job.prepared.values).filter(Boolean).length;
+  const buttons = job.suggestions.map((s, i) => [Markup.button.callback(`📝 ${s}`, `jn:${job.id}:${i}`)]);
+  await ctx.reply(
+    `📄 ${job.sourceName} — read, ${found} value(s) found.\n\nWhat's the Job Name? Tap one or type your own.`,
+    buttons.length ? Markup.inlineKeyboard(buttons) : Markup.forceReply().placeholder('Job Name'),
+  );
+}
+
+async function finish(ctx: Context, job: Job, jobName: string) {
+  waitForName(job.userId, undefined);
+  job.jobName = jobName.trim();
   await ctx.sendChatAction('upload_document').catch(() => {});
   try {
-    const source = await download(ctx, doc);
-    const res = await fillJob(source, jobName);
+    const res = await renderJob({ prepared: job.prepared, jobName: job.jobName, overrides: job.overrides, flatten: job.flatten });
     const filled = Object.keys(res.values).length;
     let caption = `✅ ${res.fileName} — ${filled} field(s) filled.`;
     if (res.warnings.length) caption += `\n⚠️ ${res.warnings.slice(0, 5).join('\n⚠️ ')}`;
     if (res.warnings.length > 5) caption += `\n…and ${res.warnings.length - 5} more`;
-    await ctx.replyWithDocument(
-      { source: Buffer.from(res.bytes), filename: res.fileName },
-      { caption: caption.slice(0, 1000) },
-    );
+    await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, { caption: caption.slice(0, 1000) });
     console.log(`Filled "${res.fileName}" (${filled} fields, ${res.warnings.length} warnings)`);
-  } catch (e: any) {
+  } catch (e) {
     console.error(e);
-    await ctx.reply(`❌ ${e?.message ?? e}`);
+    await ctx.reply(`❌ ${errText(e)}`);
   }
 }
 
@@ -69,8 +107,8 @@ async function importTemplate(ctx: Context, d: Doc) {
     const bytes = await download(ctx, d);
     const t = await saveTemplate(new TextDecoder().decode(bytes));
     await ctx.reply(`✅ Template saved.\n\n${templateSummary(t)}`);
-  } catch (e: any) {
-    await ctx.reply(`❌ Could not use that template: ${e?.message ?? e}`);
+  } catch (e) {
+    await ctx.reply(`❌ Could not use that template: ${errText(e)}`);
   }
 }
 
@@ -95,25 +133,56 @@ export function createBot(token = config.token): Telegraf {
     if (reply?.document) return importTemplate(ctx, reply.document);
     try {
       await ctx.reply(templateSummary(await loadTemplate()));
-    } catch (e: any) {
-      await ctx.reply(`⚠️ ${e.message}`);
+    } catch (e) {
+      await ctx.reply(`⚠️ ${errText(e)}`);
     }
   });
 
-  // "/write Job" typed as text, as a reply to a PDF
+  // "/write Job" as a reply to a PDF ("/write" alone: I ask for the name)
   bot.command('write', async (ctx) => {
     const jobName = commandArgs(ctx.message.text, 'write') ?? '';
-    const reply = (ctx.message as any).reply_to_message;
-    await write(ctx, jobName, reply?.document);
+    const doc: Doc | undefined = (ctx.message as any).reply_to_message?.document;
+    if (!doc) {
+      const pending = jobAwaitingName(ctx.from.id);
+      if (pending && jobName) return finish(ctx, pending, jobName);
+      return ctx.reply('Send me the source PDF first (or reply to one with /write <Job Name>).');
+    }
+    const job = await startJob(ctx, doc);
+    if (!job) return;
+    if (jobName) return finish(ctx, job, jobName);
+    return askName(ctx, job);
   });
 
-  // a document whose caption is a command: "/write Job" (PDF) or "/template" (JSON)
   bot.on(message('document'), async (ctx) => {
-    const caption = ctx.message.caption;
-    const jobName = commandArgs(caption, 'write');
-    if (jobName !== undefined) return write(ctx, jobName, ctx.message.document);
-    if (commandArgs(caption, 'template') !== undefined) return importTemplate(ctx, ctx.message.document);
-    if (isPdf(ctx.message.document)) return ctx.reply('Got the PDF. Reply to it with /write <Job Name> to fill the form.');
+    const caption = (ctx.message.caption ?? '').trim();
+    const document = ctx.message.document;
+    if (commandArgs(caption, 'template') !== undefined) return importTemplate(ctx, document);
+    if (!isPdf(document) && /\.json$/i.test(document.file_name ?? '')) return importTemplate(ctx, document);
+    const job = await startJob(ctx, document);
+    if (!job) return;
+    // caption "/write Name" or simply "Name" = the Job Name
+    const name = commandArgs(caption, 'write') ?? (caption.startsWith('/') ? '' : caption);
+    if (name) return finish(ctx, job, name);
+    return askName(ctx, job);
+  });
+
+  // tap on a suggested name
+  bot.action(/^jn:(\w+):(\d+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    const name = job?.suggestions[Number(ctx.match[2])];
+    await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
+    if (!job || !name) return;
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    return finish(ctx, job, name);
+  });
+
+  // typed text while a PDF waits for its Job Name
+  bot.on(message('text'), async (ctx) => {
+    const text = ctx.message.text.trim();
+    if (text.startsWith('/')) return;
+    const job = jobAwaitingName(ctx.from.id);
+    if (!job) return ctx.reply('Send me a source PDF and I will fill the form. /help');
+    return finish(ctx, job, text);
   });
 
   bot.catch((err, ctx) => {
