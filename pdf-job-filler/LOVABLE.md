@@ -1,5 +1,10 @@
 # Importing the web app into Lovable
 
+> **Already done:** the app is in the Lovable project "PDF Job Filler", synced with the GitHub repo
+> `panispanis0-art/pdf-job-filler` (Lovable's TanStack Start template; the app lives in `src/pdf-app`, the shared
+> logic in `src/shared`, loaded browser-only from `src/routes/index.tsx`). The steps below are for a fresh copy.
+> When `shared/src` changes here, copy it to `src/shared` in that repo too.
+
 The web app is a normal **Vite + React + TypeScript** project with no backend, so Lovable can host and edit it.
 It needs no Supabase, no API keys and no Lovable AI credits to run.
 

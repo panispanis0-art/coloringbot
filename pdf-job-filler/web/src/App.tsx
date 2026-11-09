@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { Template } from '@shared';
-import { getActiveId, listTemplates, setActiveId } from '@/lib/store';
-import { RunPage } from '@/pages/RunPage';
-import { SetupPage } from '@/pages/SetupPage';
-import { TemplatesPage } from '@/pages/TemplatesPage';
-import { SettingsPage } from '@/pages/SettingsPage';
+import { useCallback, useEffect, useState } from "react";
+import type { Template } from "@shared";
+import { getActiveId, listTemplates, setActiveId } from "@/lib/store";
+import { RunPage } from "@/pages/RunPage";
+import { SetupPage } from "@/pages/SetupPage";
+import { TemplatesPage } from "@/pages/TemplatesPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 
-type Tab = 'run' | 'setup' | 'templates' | 'settings';
+type Tab = "run" | "setup" | "templates" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'run', label: 'Run' },
-  { id: 'setup', label: 'Setup' },
-  { id: 'templates', label: 'Templates' },
-  { id: 'settings', label: 'Settings' },
+  { id: "run", label: "Run" },
+  { id: "setup", label: "Setup" },
+  { id: "templates", label: "Templates" },
+  { id: "settings", label: "Settings" },
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('run');
+  const [tab, setTab] = useState<Tab>("run");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [activeId, setActive] = useState<string>();
   const [editing, setEditing] = useState<Template>();
@@ -47,9 +47,9 @@ export default function App() {
           {TABS.map((t) => (
             <button
               key={t.id}
-              className={tab === t.id ? 'active' : ''}
+              className={tab === t.id ? "active" : ""}
               onClick={() => {
-                if (t.id === 'setup' && tab !== 'setup') {
+                if (t.id === "setup" && tab !== "setup") {
                   // a fresh Setup unless we came from "Edit"
                   setEditing(undefined);
                   setSetupKey((k) => k + 1);
@@ -63,10 +63,15 @@ export default function App() {
         </nav>
       </header>
       <main>
-        {tab === 'run' && (
-          <RunPage templates={templates} activeId={activeId} onActive={makeActive} goSetup={() => setTab('setup')} />
+        {tab === "run" && (
+          <RunPage
+            templates={templates}
+            activeId={activeId}
+            onActive={makeActive}
+            goSetup={() => setTab("setup")}
+          />
         )}
-        {tab === 'setup' && (
+        {tab === "setup" && (
           <SetupPage
             key={setupKey}
             editing={editing}
@@ -76,7 +81,7 @@ export default function App() {
             }}
           />
         )}
-        {tab === 'templates' && (
+        {tab === "templates" && (
           <TemplatesPage
             templates={templates}
             activeId={activeId}
@@ -85,11 +90,11 @@ export default function App() {
             onEdit={(t) => {
               setEditing(t);
               setSetupKey((k) => k + 1);
-              setTab('setup');
+              setTab("setup");
             }}
           />
         )}
-        {tab === 'settings' && <SettingsPage />}
+        {tab === "settings" && <SettingsPage />}
       </main>
     </div>
   );

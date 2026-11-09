@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
-import { runJob, type Template } from '@shared';
-import { pdfjs, pdfjsOptions } from '@/lib/pdfjs';
-import { readFile } from '@/lib/files';
-import { getFont, loadSettings } from '@/lib/store';
-import { FilePicker } from '@/components/FilePicker';
-import { ResultView } from '@/components/ResultView';
+import { useEffect, useState } from "react";
+import { errorMessage, runJob, type Template } from "@shared";
+import { pdfjs, pdfjsOptions } from "@/lib/pdfjs";
+import { readFile } from "@/lib/files";
+import { getFont, loadSettings } from "@/lib/store";
+import { FilePicker } from "@/components/FilePicker";
+import { ResultView } from "@/components/ResultView";
 
 interface Props {
   templates: Template[];
-  activeId?: string;
+  activeId?: string | undefined;
   onActive: (id: string) => void;
   goSetup: () => void;
 }
@@ -16,22 +16,28 @@ interface Props {
 export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
   const template = templates.find((t) => t.id === activeId) ?? templates[0];
   const [source, setSource] = useState<{ name: string; bytes: Uint8Array }>();
-  const [jobName, setJobName] = useState('');
+  const [jobName, setJobName] = useState("");
   const [flatten, setFlatten] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [values, setValues] = useState<Record<string, string>>();
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<{ bytes: Uint8Array; fileName: string; warnings: string[] }>();
+  const [result, setResult] = useState<{
+    bytes: Uint8Array;
+    fileName: string;
+    warnings: string[];
+  }>();
 
-  useEffect(() => setFlatten(template?.options.flatten ?? false), [template?.id]);
+  useEffect(() => setFlatten(template?.options.flatten ?? false), [template?.id, template?.options.flatten]);
 
   if (!templates.length || !template) {
     return (
       <div className="page">
         <section className="card center">
           <h2>No template yet</h2>
-          <p className="muted">Create one in Setup (one time), or import a template JSON in Templates.</p>
+          <p className="muted">
+            Create one in Setup (one time), or import a template JSON in Templates.
+          </p>
           <button className="btn primary" onClick={goSetup}>
             Go to Setup
           </button>
@@ -69,8 +75,8 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
       });
       setValues(res.values);
       setResult({ bytes: res.bytes, fileName: res.fileName, warnings: res.warnings });
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e) {
+      setError(errorMessage(e));
       setResult(undefined);
     } finally {
       setBusy(false);
@@ -78,7 +84,7 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
   }
 
   const ready = !!source && !!jobName.trim();
-  const mapped = template.mappings.filter((m) => m.rule.type !== 'skip');
+  const mapped = template.mappings.filter((m) => m.rule.type !== "skip");
 
   return (
     <div className="page run">
@@ -110,7 +116,7 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
             value={jobName}
             placeholder="e.g. Smith Kitchen 2026-11"
             onChange={(e) => setJobName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && ready && run()}
+            onKeyDown={(e) => e.key === "Enter" && ready && run()}
           />
         </label>
         <label className="check">
@@ -119,10 +125,14 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
         </label>
         <div className="btn-row">
           <button className="btn primary big" disabled={!ready || busy} onClick={() => run({})}>
-            {busy ? 'Filling…' : 'Fill form'}
+            {busy ? "Filling…" : "Fill form"}
           </button>
         </div>
-        {!template.targetFormBase64 && <div className="error">This template has no target form inside. Edit it in Setup and load the form.</div>}
+        {!template.targetFormBase64 && (
+          <div className="error">
+            This template has no target form inside. Edit it in Setup and load the form.
+          </div>
+        )}
         {error && <div className="error">{error}</div>}
       </section>
 
@@ -130,7 +140,8 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
         <section className="card">
           <details open={!result || Object.keys(edits).length > 0}>
             <summary>
-              <strong>Values</strong> <span className="muted small">— correct anything and press “Apply”</span>
+              <strong>Values</strong>{" "}
+              <span className="muted small">— correct anything and press “Apply”</span>
             </summary>
             <table className="values">
               <tbody>
@@ -139,8 +150,12 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
                     <th>{m.fieldName}</th>
                     <td>
                       <input
-                        value={edits[m.fieldName] ?? values[m.fieldName] ?? ''}
-                        className={values[m.fieldName] === undefined && edits[m.fieldName] === undefined ? 'missing' : ''}
+                        value={edits[m.fieldName] ?? values[m.fieldName] ?? ""}
+                        className={
+                          values[m.fieldName] === undefined && edits[m.fieldName] === undefined
+                            ? "missing"
+                            : ""
+                        }
                         placeholder="not found"
                         onChange={(e) => setEdits({ ...edits, [m.fieldName]: e.target.value })}
                       />

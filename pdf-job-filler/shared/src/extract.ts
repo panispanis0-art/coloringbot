@@ -1,11 +1,30 @@
-import type { SourceDoc, SourcePage, TextItem, TextLine, LineSegment } from './types';
+import type { SourceDoc, SourcePage, TextItem, TextLine, LineSegment } from "./types";
 
 /**
  * The bit of pdf.js we need. The web app passes `pdfjs-dist`, the bot passes
  * `pdfjs-dist/legacy/build/pdf.mjs`, so this module never imports pdf.js itself.
  */
 export interface PdfJsLike {
-  getDocument(src: any): { promise: Promise<any> };
+  getDocument(src: Record<string, unknown>): { promise: Promise<PdfDocLike> };
+}
+
+interface PdfTextItemLike {
+  str?: unknown;
+  transform?: number[];
+  width?: number;
+  height?: number;
+}
+
+interface PdfPageLike {
+  getViewport(params: { scale: number }): { width: number; height: number };
+  getTextContent(): Promise<{ items: object[] }>;
+  cleanup?(): unknown;
+}
+
+interface PdfDocLike {
+  numPages: number;
+  getPage(n: number): Promise<PdfPageLike>;
+  destroy?(): Promise<unknown>;
 }
 
 /** Extract positioned text from a text-based PDF. */
@@ -31,11 +50,12 @@ export async function extractSource(
       const viewport = page.getViewport({ scale: 1 });
       const content = await page.getTextContent();
       const items: TextItem[] = [];
-      for (const it of content.items as any[]) {
-        if (typeof it.str !== 'string') continue;
-        const t = it.transform as number[];
-        const h = it.height || Math.hypot(t[2], t[3]) || 10;
-        items.push({ str: it.str, x: t[4], y: t[5], w: it.width || 0, h });
+      for (const raw of content.items) {
+        const it = raw as PdfTextItemLike;
+        if (typeof it.str !== "string") continue;
+        const [, , c = 0, d = 0, e = 0, f = 0] = it.transform ?? [];
+        const h = it.height || Math.hypot(c, d) || 10;
+        items.push({ str: it.str, x: e, y: f, w: it.width || 0, h });
       }
       const lines = groupLines(items, p);
       for (const l of lines) l.index = lineIndex++;
@@ -46,7 +66,7 @@ export async function extractSource(
     await doc.destroy?.();
   }
   const lines = pages.flatMap((pg) => pg.lines);
-  const fullText = pages.map((pg) => pg.lines.map((l) => l.text).join('\n')).join('\n\f\n');
+  const fullText = pages.map((pg) => pg.lines.map((l) => l.text).join("\n")).join("\n\f\n");
   return { pages, lines, fullText };
 }
 
@@ -59,7 +79,7 @@ export function groupLines(items: TextItem[], page: number): TextLine[] {
   for (const it of usable) {
     const row = rows[rows.length - 1];
     if (row) {
-      const ref = row[0];
+      const ref = row[0]!;
       const tol = Math.max(2, Math.min(ref.h, it.h) * 0.5);
       if (Math.abs(ref.y - it.y) <= tol) {
         row.push(it);
@@ -73,16 +93,16 @@ export function groupLines(items: TextItem[], page: number): TextLine[] {
     row.sort((a, b) => a.x - b.x);
     const segments: LineSegment[] = [];
     let cur: TextItem[] = [];
-    let text = '';
+    let text = "";
     const flush = () => {
-      const t = text.replace(/\s+/g, ' ').trim();
+      const t = text.replace(/\s+/g, " ").trim();
       if (cur.length && t) {
-        const x = cur[0].x;
-        const last = cur[cur.length - 1];
+        const x = cur[0]!.x;
+        const last = cur[cur.length - 1]!;
         segments.push({ text: t, x, w: last.x + last.w - x, items: cur });
       }
       cur = [];
-      text = '';
+      text = "";
     };
     let space = false;
     for (const it of row) {
@@ -92,12 +112,13 @@ export function groupLines(items: TextItem[], page: number): TextLine[] {
         continue;
       }
       if (cur.length) {
-        const prev = cur[cur.length - 1];
+        const prev = cur[cur.length - 1]!;
         const gap = it.x - (prev.x + prev.w);
         const h = Math.max(prev.h, it.h);
         // a gap wider than ~1 character height starts a new cell ("Order No:      WO-1")
         if (gap > h * 1.2) flush();
-        else if ((space || gap > h * 0.15) && !text.endsWith(' ') && !it.str.startsWith(' ')) text += ' ';
+        else if ((space || gap > h * 0.15) && !text.endsWith(" ") && !it.str.startsWith(" "))
+          text += " ";
       }
       space = false;
       cur.push(it);
@@ -105,14 +126,14 @@ export function groupLines(items: TextItem[], page: number): TextLine[] {
     }
     flush();
     if (!segments.length) continue;
-    const x = segments[0].x;
-    const lastSeg = segments[segments.length - 1];
+    const x = segments[0]!.x;
+    const lastSeg = segments[segments.length - 1]!;
     lines.push({
       page,
       index: 0,
-      text: segments.map((s) => s.text).join('  '),
+      text: segments.map((s) => s.text).join("  "),
       x,
-      y: row[0].y,
+      y: row[0]!.y,
       w: lastSeg.x + lastSeg.w - x,
       h: Math.max(...row.map((i) => i.h)),
       segments,

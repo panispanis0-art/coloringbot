@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { pdfjs, pdfjsOptions } from '@/lib/pdfjs';
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { PDFDocumentProxy, PageViewport, RenderTask } from "pdfjs-dist";
+import { errorMessage } from "@shared";
+import { pdfjs, pdfjsOptions } from "@/lib/pdfjs";
 
 export interface Box {
   key: string;
@@ -8,45 +10,55 @@ export interface Box {
   y: number;
   w: number;
   h: number;
-  className?: string;
-  title?: string;
-  label?: ReactNode;
-  onClick?: () => void;
+  className?: string | undefined;
+  title?: string | undefined;
+  label?: ReactNode | undefined;
+  onClick?: () => void | undefined;
 }
 
 interface Props {
   bytes: Uint8Array;
   page: number;
-  boxes?: Box[];
+  boxes?: Box[] | undefined;
   /** called with a rectangle in PDF coordinates when the user drags on the page */
-  onSelectRect?: (r: { x: number; y: number; w: number; h: number }) => void;
-  onPageCount?: (n: number) => void;
-  maxWidth?: number;
+  onSelectRect?: (r: { x: number; y: number; w: number; h: number }) => void | undefined;
+  onPageCount?: (n: number) => void | undefined;
+  maxWidth?: number | undefined;
 }
 
 /** Renders one PDF page to a canvas with clickable overlay boxes and drag-to-select. */
-export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, maxWidth = 900 }: Props) {
+export function PdfPage({
+  bytes,
+  page,
+  boxes = [],
+  onSelectRect,
+  onPageCount,
+  maxWidth = 900,
+}: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [doc, setDoc] = useState<any>();
-  const [viewport, setViewport] = useState<any>();
+  const [doc, setDoc] = useState<PDFDocumentProxy>();
+  const [viewport, setViewport] = useState<PageViewport>();
   const [width, setWidth] = useState(0);
   const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     let cancelled = false;
-    let loaded: any;
+    let loaded: PDFDocumentProxy | undefined;
     setError(undefined);
     pdfjs
       .getDocument({ ...pdfjsOptions, data: bytes.slice() })
-      .promise.then((d: any) => {
+      .promise.then((d) => {
         loaded = d;
-        if (cancelled) return d.destroy();
+        if (cancelled) {
+          void d.destroy();
+          return;
+        }
         setDoc(d);
         onPageCount?.(d.numPages);
       })
-      .catch((e: any) => setError(String(e?.message ?? e)));
+      .catch((e: unknown) => setError(errorMessage(e)));
     return () => {
       cancelled = true;
       loaded?.destroy();
@@ -64,7 +76,7 @@ export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, ma
 
   useEffect(() => {
     if (!doc || !width || !canvas.current) return;
-    let task: any;
+    let task: RenderTask | undefined;
     let cancelled = false;
     (async () => {
       const p = await doc.getPage(Math.min(Math.max(1, page), doc.numPages));
@@ -78,7 +90,7 @@ export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, ma
       c.style.width = `${vp.width}px`;
       c.style.height = `${vp.height}px`;
       task = p.render({
-        canvasContext: c.getContext('2d')!,
+        canvasContext: c.getContext("2d")!,
         canvas: c,
         viewport: vp,
         transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined,
@@ -93,13 +105,23 @@ export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, ma
     };
   }, [doc, page, width]);
 
-  const toCss = (b: { x: number; y: number; w: number; h: number }) => {
-    const [x1, y1, x2, y2] = viewport.convertToViewportRectangle([b.x, b.y, b.x + b.w, b.y + b.h]);
-    return { left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
+  const toCss = (vp: PageViewport, b: { x: number; y: number; w: number; h: number }) => {
+    const [x1 = 0, y1 = 0, x2 = 0, y2 = 0] = vp.convertToViewportRectangle([
+      b.x,
+      b.y,
+      b.x + b.w,
+      b.y + b.h,
+    ]);
+    return {
+      left: Math.min(x1, x2),
+      top: Math.min(y1, y2),
+      width: Math.abs(x2 - x1),
+      height: Math.abs(y2 - y1),
+    };
   };
 
   const local = (e: React.PointerEvent) => {
-    const r = wrap.current!.querySelector('.pdfpage-stage')!.getBoundingClientRect();
+    const r = wrap.current!.querySelector(".pdfpage-stage")!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
@@ -108,9 +130,14 @@ export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, ma
   return (
     <div className="pdfpage" ref={wrap}>
       <div
-        className={`pdfpage-stage ${onSelectRect ? 'selectable' : ''}`}
+        className={`pdfpage-stage ${onSelectRect ? "selectable" : ""}`}
         onPointerDown={(e) => {
-          if (!onSelectRect || e.button !== 0 || (e.target as HTMLElement).classList.contains('box')) return;
+          if (
+            !onSelectRect ||
+            e.button !== 0 ||
+            (e.target as HTMLElement).classList.contains("box")
+          )
+            return;
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
           const p = local(e);
           setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
@@ -135,8 +162,8 @@ export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, ma
           boxes.map((b) => (
             <div
               key={b.key}
-              className={`box ${b.className ?? ''} ${b.onClick ? 'clickable' : ''}`}
-              style={toCss(b)}
+              className={`box ${b.className ?? ""} ${b.onClick ? "clickable" : ""}`}
+              style={toCss(viewport, b)}
               title={b.title}
               onClick={b.onClick}
             >
@@ -159,7 +186,15 @@ export function PdfPage({ bytes, page, boxes = [], onSelectRect, onPageCount, ma
   );
 }
 
-export function PageNav({ page, count, onChange }: { page: number; count: number; onChange: (p: number) => void }) {
+export function PageNav({
+  page,
+  count,
+  onChange,
+}: {
+  page: number;
+  count: number;
+  onChange: (p: number) => void;
+}) {
   if (count <= 1) return null;
   return (
     <div className="pagenav">

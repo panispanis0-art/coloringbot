@@ -44,36 +44,37 @@ export interface SourceDoc {
   fullText: string;
 }
 
-export type FieldType = 'text' | 'checkbox' | 'dropdown' | 'optionlist' | 'radio' | 'button' | 'signature' | 'unknown';
+export type FieldType =
+  "text" | "checkbox" | "dropdown" | "optionlist" | "radio" | "button" | "signature" | "unknown";
 
 export interface FormFieldInfo {
   name: string;
   type: FieldType;
   /** choices for dropdown / option list / radio */
-  options?: string[];
+  options?: string[] | undefined;
   /** current value in the blank form */
-  currentValue?: string;
+  currentValue?: string | undefined;
   /** first widget location: 1-based page and rectangle in points */
-  page?: number;
-  rect?: { x: number; y: number; w: number; h: number };
-  readOnly?: boolean;
-  multiline?: boolean;
-  maxLength?: number;
+  page?: number | undefined;
+  rect?: { x: number; y: number; w: number; h: number } | undefined;
+  readOnly?: boolean | undefined;
+  multiline?: boolean | undefined;
+  maxLength?: number | undefined;
 }
 
-export type Transform = 'none' | 'upper' | 'lower' | 'title';
+export type Transform = "none" | "upper" | "lower" | "title";
 
 interface RuleBase {
-  transform?: Transform;
+  transform?: Transform | undefined;
   /** used when the rule finds nothing */
-  defaultValue?: string;
-  prefix?: string;
-  suffix?: string;
+  defaultValue?: string | undefined;
+  prefix?: string | undefined;
+  suffix?: string | undefined;
 }
 
 /** Find a label in the text and take the value next to / below it. */
 export interface LabelRule extends RuleBase {
-  type: 'label';
+  type: "label";
   label: string;
   /**
    * auto: rest of the same cell/line, else the next cell, else the next line.
@@ -81,31 +82,31 @@ export interface LabelRule extends RuleBase {
    * nextLine: the next line in reading order.
    * below: the line underneath the label (overlapping horizontally).
    */
-  valueOn?: 'auto' | 'sameLine' | 'nextLine' | 'below';
+  valueOn?: "auto" | "sameLine" | "nextLine" | "below" | undefined;
   /** 1-based: use the n-th time the label appears. Default 1. */
-  occurrence?: number;
-  caseSensitive?: boolean;
+  occurrence?: number | undefined;
+  caseSensitive?: boolean | undefined;
   /** Optional regex: cut the value where this matches (e.g. "\\s{2,}|Date:"). */
-  stopAt?: string;
+  stopAt?: string | undefined;
   /** How many lines to take for nextLine/below. Default 1. */
-  lines?: number;
+  lines?: number | undefined;
 }
 
 /** Run a regular expression over the full text. */
 export interface RegexRule extends RuleBase {
-  type: 'regex';
+  type: "regex";
   pattern: string;
   /** JS regex flags, default "i". "g" is ignored. */
-  flags?: string;
+  flags?: string | undefined;
   /** capture group to use. Default 1 if the pattern has groups, else 0. */
-  group?: number;
+  group?: number | undefined;
   /** 1-based match number. Default 1. */
-  occurrence?: number;
+  occurrence?: number | undefined;
 }
 
 /** Take all text inside a rectangle on a page. */
 export interface PositionRule extends RuleBase {
-  type: 'position';
+  type: "position";
   page: number;
   x: number;
   y: number;
@@ -114,25 +115,26 @@ export interface PositionRule extends RuleBase {
 }
 
 export interface StaticRule extends RuleBase {
-  type: 'static';
+  type: "static";
   value: string;
 }
 
 export interface JobNameRule extends RuleBase {
-  type: 'jobName';
+  type: "jobName";
 }
 
 /** Today's date. Tokens: DD, MM, YYYY, YY */
 export interface DateRule extends RuleBase {
-  type: 'date';
-  format?: string;
+  type: "date";
+  format?: string | undefined;
 }
 
 export interface SkipRule {
-  type: 'skip';
+  type: "skip";
 }
 
-export type MappingRule = LabelRule | RegexRule | PositionRule | StaticRule | JobNameRule | DateRule | SkipRule;
+export type MappingRule =
+  LabelRule | RegexRule | PositionRule | StaticRule | JobNameRule | DateRule | SkipRule;
 
 export interface FieldMapping {
   fieldName: string;
@@ -148,9 +150,9 @@ export interface Template {
   createdAt: string;
   updatedAt: string;
   /** file name of the target form, for display */
-  targetFormName?: string;
+  targetFormName?: string | undefined;
   /** the blank target form, base64. Makes the template self-contained (web + bot). */
-  targetFormBase64?: string;
+  targetFormBase64?: string | undefined;
   mappings: FieldMapping[];
   options: {
     flatten: boolean;
@@ -158,24 +160,24 @@ export interface Template {
 }
 
 export interface PdfMetadata {
-  author?: string;
-  creator?: string;
-  producer?: string;
+  author?: string | undefined;
+  creator?: string | undefined;
+  producer?: string | undefined;
   /** If set, written as the document Title. */
-  title?: string;
-  subject?: string;
-  keywords?: string;
+  title?: string | undefined;
+  subject?: string | undefined;
+  keywords?: string | undefined;
 }
 
 export interface FillOptions {
-  flatten?: boolean;
-  metadata?: PdfMetadata;
+  flatten?: boolean | undefined;
+  metadata?: PdfMetadata | undefined;
   /** Remove the XMP metadata stream so viewers show the Info values above. Default true. */
-  stripXmp?: boolean;
+  stripXmp?: boolean | undefined;
   /** Set ModDate (and CreationDate if missing) to now. Default true. */
-  updateDates?: boolean;
+  updateDates?: boolean | undefined;
   /** A TTF/OTF font for characters the standard Helvetica cannot draw (ă, ș, ț, Cyrillic...). */
-  fontBytes?: Uint8Array;
+  fontBytes?: Uint8Array | undefined;
 }
 
 export interface FillResult {

@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react';
-import { DEFAULT_SETTINGS, getFont, loadSettings, saveSettings, setFont, type Settings } from '@/lib/store';
-import { readFile } from '@/lib/files';
-import { FilePicker } from '@/components/FilePicker';
+import { useEffect, useState } from "react";
+import {
+  DEFAULT_SETTINGS,
+  getFont,
+  loadSettings,
+  saveSettings,
+  setFont,
+  type Settings,
+} from "@/lib/store";
+import { readFile } from "@/lib/files";
+import { FilePicker } from "@/components/FilePicker";
 
 export function SettingsPage() {
   const [s, setS] = useState<Settings>(loadSettings);
@@ -27,8 +34,8 @@ export function SettingsPage() {
 
         <h3>PDF metadata</h3>
         <p className="muted small">
-          Written into every filled PDF (File → Properties). Leave a box empty to remove that entry. Nothing else is
-          added: no watermark, no “pdf-lib” producer stamp.
+          Written into every filled PDF (File → Properties). Leave a box empty to remove that entry.
+          Nothing else is added: no watermark, no “pdf-lib” producer stamp.
         </p>
         <label className="row">
           <span>Author</span>
@@ -36,35 +43,61 @@ export function SettingsPage() {
         </label>
         <label className="row">
           <span>Creator (application)</span>
-          <input value={s.creator} placeholder="empty = remove" onChange={(e) => update({ creator: e.target.value })} />
+          <input
+            value={s.creator}
+            placeholder="empty = remove"
+            onChange={(e) => update({ creator: e.target.value })}
+          />
         </label>
         <label className="row">
           <span>Producer</span>
-          <input value={s.producer} placeholder="empty = remove" onChange={(e) => update({ producer: e.target.value })} />
+          <input
+            value={s.producer}
+            placeholder="empty = remove"
+            onChange={(e) => update({ producer: e.target.value })}
+          />
         </label>
         <label className="check">
-          <input type="checkbox" checked={s.titleFromJobName} onChange={(e) => update({ titleFromJobName: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={s.titleFromJobName}
+            onChange={(e) => update({ titleFromJobName: e.target.checked })}
+          />
           Set the document Title to the Job Name
         </label>
         <label className="check">
-          <input type="checkbox" checked={s.updateDates} onChange={(e) => update({ updateDates: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={s.updateDates}
+            onChange={(e) => update({ updateDates: e.target.checked })}
+          />
           Set “Modified” date to now
         </label>
         <label className="check">
-          <input type="checkbox" checked={s.stripXmp} onChange={(e) => update({ stripXmp: e.target.checked })} />
-          Remove the form's old XMP metadata (so viewers show the values above, not the original form's)
+          <input
+            type="checkbox"
+            checked={s.stripXmp}
+            onChange={(e) => update({ stripXmp: e.target.checked })}
+          />
+          Remove the form's old XMP metadata (so viewers show the values above, not the original
+          form's)
         </label>
 
         <h3>Templates</h3>
         <label className="check">
-          <input type="checkbox" checked={s.exportWithForm} onChange={(e) => update({ exportWithForm: e.target.checked })} />
+          <input
+            type="checkbox"
+            checked={s.exportWithForm}
+            onChange={(e) => update({ exportWithForm: e.target.checked })}
+          />
           Export templates with the target form inside (needed by the Telegram bot)
         </label>
 
         <h3>Font for special characters</h3>
         <p className="muted small">
-          The standard PDF font has no ă, ș, ț, Cyrillic, Greek… Without a font those letters become their plain
-          version (ș → s). Load a .ttf/.otf (e.g. C:\Windows\Fonts\arial.ttf) to keep them.
+          The standard PDF font has no ă, ș, ț, Cyrillic, Greek… Without a font those letters become
+          their plain version (ș → s). Load a .ttf/.otf (e.g. C:\Windows\Fonts\arial.ttf) to keep
+          them.
         </p>
         <FilePicker
           label="Unicode font (.ttf / .otf)"
@@ -91,7 +124,7 @@ export function SettingsPage() {
           <button
             className="btn ghost"
             onClick={() => {
-              if (confirm('Reset settings to defaults?')) update({ ...DEFAULT_SETTINGS });
+              if (confirm("Reset settings to defaults?")) update({ ...DEFAULT_SETTINGS });
             }}
           >
             Reset to defaults

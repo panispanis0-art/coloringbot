@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react';
-import { describeRule, safeFileName, type Template } from '@shared';
-import { deleteTemplate, importTemplateJson, loadSettings } from '@/lib/store';
-import { downloadBytes } from '@/lib/files';
+import { useRef, useState } from "react";
+import { errorMessage, describeRule, safeFileName, type Template } from "@shared";
+import { deleteTemplate, importTemplateJson, loadSettings } from "@/lib/store";
+import { downloadBytes } from "@/lib/files";
 
 interface Props {
   templates: Template[];
-  activeId?: string;
+  activeId?: string | undefined;
   onActive: (id: string) => void;
   onEdit: (t: Template) => void;
   onChanged: () => void;
@@ -21,7 +21,11 @@ export function TemplatesPage({ templates, activeId, onActive, onEdit, onChanged
     const withForm = loadSettings().exportWithForm;
     const out = withForm ? t : { ...t, targetFormBase64: undefined };
     const json = JSON.stringify(out, null, 2);
-    downloadBytes(new TextEncoder().encode(json), safeFileName(t.name, '.template.json'), 'application/json');
+    downloadBytes(
+      new TextEncoder().encode(json),
+      safeFileName(t.name, ".template.json"),
+      "application/json",
+    );
   }
 
   return (
@@ -36,8 +40,9 @@ export function TemplatesPage({ templates, activeId, onActive, onEdit, onChanged
           </div>
         </div>
         <p className="muted small">
-          Templates are stored on this device (browser storage). Export one to back it up, move it to another device,
-          or give it to the Telegram bot (send the .json to the bot with the caption /template).
+          Templates are stored on this device (browser storage). Export one to back it up, move it
+          to another device, or give it to the Telegram bot (send the .json to the bot with the
+          caption /template).
         </p>
         <input
           ref={fileInput}
@@ -46,15 +51,15 @@ export function TemplatesPage({ templates, activeId, onActive, onEdit, onChanged
           hidden
           onChange={async (e) => {
             const f = e.target.files?.[0];
-            e.target.value = '';
+            e.target.value = "";
             if (!f) return;
             try {
               const t = await importTemplateJson(await f.text());
               setMsg(`Imported "${t.name}".`);
               setError(undefined);
               onChanged();
-            } catch (err: any) {
-              setError(`Import failed: ${err?.message ?? err}`);
+            } catch (err) {
+              setError(`Import failed: ${errorMessage(err)}`);
             }
           }}
         />
@@ -63,15 +68,17 @@ export function TemplatesPage({ templates, activeId, onActive, onEdit, onChanged
         {!templates.length && <p className="muted">No templates yet.</p>}
         <ul className="template-list">
           {templates.map((t) => {
-            const used = t.mappings.filter((m) => m.rule.type !== 'skip');
+            const used = t.mappings.filter((m) => m.rule.type !== "skip");
             return (
-              <li key={t.id} className={t.id === activeId ? 'active' : ''}>
+              <li key={t.id} className={t.id === activeId ? "active" : ""}>
                 <div className="tpl-head">
                   <div>
-                    <strong>{t.name}</strong> {t.id === activeId && <span className="tag green">active</span>}
+                    <strong>{t.name}</strong>{" "}
+                    {t.id === activeId && <span className="tag green">active</span>}
                     <div className="muted small">
-                      {t.targetFormName ?? 'no form'} · {used.length}/{t.mappings.length} fields mapped · flatten{' '}
-                      {t.options.flatten ? 'on' : 'off'} · updated {new Date(t.updatedAt).toLocaleString()}
+                      {t.targetFormName ?? "no form"} · {used.length}/{t.mappings.length} fields
+                      mapped · flatten {t.options.flatten ? "on" : "off"} · updated{" "}
+                      {new Date(t.updatedAt).toLocaleString()}
                     </div>
                   </div>
                   <div className="btn-row">
@@ -80,8 +87,11 @@ export function TemplatesPage({ templates, activeId, onActive, onEdit, onChanged
                         Make active
                       </button>
                     )}
-                    <button className="btn small" onClick={() => setOpen(open === t.id ? undefined : t.id)}>
-                      {open === t.id ? 'Hide' : 'Show'}
+                    <button
+                      className="btn small"
+                      onClick={() => setOpen(open === t.id ? undefined : t.id)}
+                    >
+                      {open === t.id ? "Hide" : "Show"}
                     </button>
                     <button className="btn small" onClick={() => onEdit(t)}>
                       Edit

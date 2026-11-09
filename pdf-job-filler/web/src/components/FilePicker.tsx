@@ -1,20 +1,26 @@
-import { useRef, useState } from 'react';
+import { useRef, useState } from "react";
 
 interface Props {
   label: string;
-  accept?: string;
-  fileName?: string;
-  hint?: string;
+  accept?: string | undefined;
+  fileName?: string | undefined;
+  hint?: string | undefined;
   onFile: (file: File) => void;
 }
 
 /** Big tap target + drag & drop. */
-export function FilePicker({ label, accept = 'application/pdf,.pdf', fileName, hint, onFile }: Props) {
+export function FilePicker({
+  label,
+  accept = "application/pdf,.pdf",
+  fileName,
+  hint,
+  onFile,
+}: Props) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   return (
     <div
-      className={`filepicker ${over ? 'over' : ''} ${fileName ? 'has-file' : ''}`}
+      className={`filepicker ${over ? "over" : ""} ${fileName ? "has-file" : ""}`}
       onClick={() => input.current?.click()}
       onDragOver={(e) => {
         e.preventDefault();
@@ -29,10 +35,10 @@ export function FilePicker({ label, accept = 'application/pdf,.pdf', fileName, h
       }}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && input.current?.click()}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
     >
       <div className="filepicker-label">{label}</div>
-      <div className="filepicker-name">{fileName ?? 'Tap to choose or drop a file'}</div>
+      <div className="filepicker-name">{fileName ?? "Tap to choose or drop a file"}</div>
       {hint && <div className="muted small">{hint}</div>}
       <input
         ref={input}
@@ -42,7 +48,7 @@ export function FilePicker({ label, accept = 'application/pdf,.pdf', fileName, h
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) onFile(f);
-          e.target.value = '';
+          e.target.value = "";
         }}
       />
     </div>

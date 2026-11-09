@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { PdfPage, PageNav } from './PdfPage';
-import { downloadBytes, shareBytes, canShareFiles } from '@/lib/files';
+import { useState } from "react";
+import { PdfPage, PageNav } from "./PdfPage";
+import { downloadBytes, shareBytes, canShareFiles } from "@/lib/files";
 
 interface Props {
   bytes: Uint8Array;
   fileName: string;
-  warnings?: string[];
+  warnings?: string[] | undefined;
 }
 
 export function ResultView({ bytes, fileName, warnings = [] }: Props) {

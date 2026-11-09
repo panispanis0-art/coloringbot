@@ -1,6 +1,6 @@
 // Tiny IndexedDB key-value store. Templates can hold a whole PDF (base64), which is too big for localStorage.
-const DB_NAME = 'pdf-job-filler';
-const STORE = 'kv';
+const DB_NAME = "pdf-job-filler";
+const STORE = "kv";
 
 let dbPromise: Promise<IDBDatabase> | undefined;
 
@@ -25,7 +25,7 @@ async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
 }
 
 export const kv = {
-  get: <T>(key: string) => run<T | undefined>('readonly', (s) => s.get(key)),
-  set: (key: string, value: unknown) => run<void>('readwrite', (s) => s.put(value, key)),
-  del: (key: string) => run<void>('readwrite', (s) => s.delete(key)),
+  get: <T>(key: string) => run<T | undefined>("readonly", (s) => s.get(key)),
+  set: (key: string, value: unknown) => run<void>("readwrite", (s) => s.put(value, key)),
+  del: (key: string) => run<void>("readwrite", (s) => s.delete(key)),
 };

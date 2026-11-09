@@ -1,4 +1,4 @@
-import type { FieldMapping, MappingRule, SourceDoc, TextLine, Transform } from './types';
+import type { FieldMapping, MappingRule, SourceDoc, TextLine, Transform } from "./types";
 
 export interface ApplyContext {
   jobName?: string;
@@ -6,13 +6,13 @@ export interface ApplyContext {
 }
 
 function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Label text matching that tolerates different spacing ("Invoice  No" vs "Invoice No"). */
 function labelRegex(label: string, caseSensitive?: boolean): RegExp {
   const parts = label.trim().split(/\s+/).map(escapeRegex);
-  return new RegExp(parts.join('\\s*'), caseSensitive ? '' : 'i');
+  return new RegExp(parts.join("\\s*"), caseSensitive ? "" : "i");
 }
 
 const SEPARATORS = /^[\s:：\-–—#=.|]+/;
@@ -35,45 +35,51 @@ function linesBelow(doc: SourceDoc, line: TextLine, x: number, w: number, count:
     // segments that overlap the label horizontally
     const segs = l.segments.filter((s) => s.x < x + Math.max(w, 40) && s.x + s.w > x - 5);
     if (!segs.length) continue;
-    out.push(segs.map((s) => s.text).join(' '));
+    out.push(segs.map((s) => s.text).join(" "));
     if (out.length >= count) break;
   }
   return out;
 }
 
-function applyLabel(doc: SourceDoc, rule: Extract<MappingRule, { type: 'label' }>): string | undefined {
+function applyLabel(
+  doc: SourceDoc,
+  rule: Extract<MappingRule, { type: "label" }>,
+): string | undefined {
   if (!rule.label?.trim()) return undefined;
   const re = labelRegex(rule.label, rule.caseSensitive);
   const want = Math.max(1, rule.occurrence ?? 1);
-  const mode = rule.valueOn ?? 'auto';
+  const mode = rule.valueOn ?? "auto";
   const count = Math.max(1, rule.lines ?? 1);
   let seen = 0;
   for (const line of doc.lines) {
     for (let si = 0; si < line.segments.length; si++) {
-      const seg = line.segments[si];
+      const seg = line.segments[si]!;
       const m = re.exec(seg.text);
       if (!m) continue;
       seen++;
       if (seen < want) continue;
 
-      const restOfCell = seg.text.slice(m.index + m[0].length).replace(SEPARATORS, '').trim();
+      const restOfCell = seg.text
+        .slice(m.index + m[0].length)
+        .replace(SEPARATORS, "")
+        .trim();
       const restOfLine = [restOfCell, ...line.segments.slice(si + 1).map((s) => s.text)]
         .filter(Boolean)
-        .join('  ')
+        .join("  ")
         .trim();
       const nextLines = () =>
         doc.lines
           .slice(line.index + 1, line.index + 1 + count)
           .map((l) => l.text)
-          .join('\n');
-      const below = () => linesBelow(doc, line, seg.x, seg.w, count).join('\n');
+          .join("\n");
+      const below = () => linesBelow(doc, line, seg.x, seg.w, count).join("\n");
 
-      let value = '';
-      if (mode === 'sameLine') value = restOfLine;
-      else if (mode === 'nextLine') value = nextLines();
-      else if (mode === 'below') value = below();
+      let value = "";
+      if (mode === "sameLine") value = restOfLine;
+      else if (mode === "nextLine") value = nextLines();
+      else if (mode === "below") value = below();
       else {
-        value = restOfCell || line.segments[si + 1]?.text || '';
+        value = restOfCell || line.segments[si + 1]?.text || "";
         if (!value) value = below() || nextLines();
       }
       return cut(value, rule.stopAt).trim();
@@ -82,11 +88,14 @@ function applyLabel(doc: SourceDoc, rule: Extract<MappingRule, { type: 'label' }
   return undefined;
 }
 
-function applyRegex(doc: SourceDoc, rule: Extract<MappingRule, { type: 'regex' }>): string | undefined {
+function applyRegex(
+  doc: SourceDoc,
+  rule: Extract<MappingRule, { type: "regex" }>,
+): string | undefined {
   if (!rule.pattern) return undefined;
   let re: RegExp;
   try {
-    const flags = (rule.flags ?? 'i').replace(/[gy]/g, '') + 'g';
+    const flags = (rule.flags ?? "i").replace(/[gy]/g, "") + "g";
     re = new RegExp(rule.pattern, flags);
   } catch {
     return undefined;
@@ -97,12 +106,15 @@ function applyRegex(doc: SourceDoc, rule: Extract<MappingRule, { type: 'regex' }
     n++;
     if (n < want) continue;
     const group = rule.group ?? (m.length > 1 ? 1 : 0);
-    return (m[group] ?? '').trim();
+    return (m[group] ?? "").trim();
   }
   return undefined;
 }
 
-function applyPosition(doc: SourceDoc, rule: Extract<MappingRule, { type: 'position' }>): string | undefined {
+function applyPosition(
+  doc: SourceDoc,
+  rule: Extract<MappingRule, { type: "position" }>,
+): string | undefined {
   const page = doc.pages.find((p) => p.page === rule.page);
   if (!page) return undefined;
   const inside = (cx: number, cy: number) =>
@@ -112,16 +124,23 @@ function applyPosition(doc: SourceDoc, rule: Extract<MappingRule, { type: 'posit
     const parts: string[] = [];
     for (const seg of line.segments) {
       const words = seg.items.filter((it) => inside(it.x + it.w / 2, it.y + it.h / 3));
-      if (words.length) parts.push(words.map((w) => w.str).join('').replace(/\s+/g, ' ').trim());
+      if (words.length)
+        parts.push(
+          words
+            .map((w) => w.str)
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim(),
+        );
     }
-    const t = parts.filter(Boolean).join(' ');
+    const t = parts.filter(Boolean).join(" ");
     if (t) out.push(t);
   }
-  return out.length ? out.join('\n') : undefined;
+  return out.length ? out.join("\n") : undefined;
 }
 
-export function formatDate(d: Date, format = 'DD.MM.YYYY'): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
+export function formatDate(d: Date, format = "DD.MM.YYYY"): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
   return format
     .replace(/YYYY/g, String(d.getFullYear()))
     .replace(/YY/g, String(d.getFullYear()).slice(-2))
@@ -131,11 +150,11 @@ export function formatDate(d: Date, format = 'DD.MM.YYYY'): string {
 
 function transform(value: string, t?: Transform): string {
   switch (t) {
-    case 'upper':
+    case "upper":
       return value.toUpperCase();
-    case 'lower':
+    case "lower":
       return value.toLowerCase();
-    case 'title':
+    case "title":
       return value.toLowerCase().replace(/(^|[\s\-'])(\p{L})/gu, (_, a, b) => a + b.toUpperCase());
     default:
       return value;
@@ -143,34 +162,39 @@ function transform(value: string, t?: Transform): string {
 }
 
 /** Resolve one rule against a source document. Returns undefined when the field should be left alone. */
-export function applyRule(doc: SourceDoc | undefined, rule: MappingRule, ctx: ApplyContext = {}): string | undefined {
-  if (rule.type === 'skip') return undefined;
+export function applyRule(
+  doc: SourceDoc | undefined,
+  rule: MappingRule,
+  ctx: ApplyContext = {},
+): string | undefined {
+  if (rule.type === "skip") return undefined;
   let raw: string | undefined;
   switch (rule.type) {
-    case 'label':
+    case "label":
       raw = doc ? applyLabel(doc, rule) : undefined;
       break;
-    case 'regex':
+    case "regex":
       raw = doc ? applyRegex(doc, rule) : undefined;
       break;
-    case 'position':
+    case "position":
       raw = doc ? applyPosition(doc, rule) : undefined;
       break;
-    case 'static':
+    case "static":
       raw = rule.value;
       break;
-    case 'jobName':
+    case "jobName":
       raw = ctx.jobName;
       break;
-    case 'date':
-      raw = formatDate(ctx.now ?? new Date(), rule.format || 'DD.MM.YYYY');
+    case "date":
+      raw = formatDate(ctx.now ?? new Date(), rule.format || "DD.MM.YYYY");
       break;
   }
-  if (raw === undefined || raw === '') {
-    if (rule.defaultValue === undefined || rule.defaultValue === '') return raw === '' ? '' : undefined;
+  if (raw === undefined || raw === "") {
+    if (rule.defaultValue === undefined || rule.defaultValue === "")
+      return raw === "" ? "" : undefined;
     raw = rule.defaultValue;
   }
-  return (rule.prefix ?? '') + transform(raw, rule.transform) + (rule.suffix ?? '');
+  return (rule.prefix ?? "") + transform(raw, rule.transform) + (rule.suffix ?? "");
 }
 
 /** Resolve all mappings. Fields whose rule finds nothing are left out. */
