@@ -14,6 +14,7 @@ import {
   type Rendered,
 } from './pdf.ts';
 import { renderPreview } from './preview.ts';
+import { allSegments, learnRule } from './teach.ts';
 import { findJob, history, saveJob } from './store.ts';
 import { addJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
@@ -264,8 +265,12 @@ async function askFieldValue(ctx: Context, job: Job, index: number) {
     return ctx.reply(`${title}\nChoose:`, Markup.inlineKeyboard([...opts, ...walkRow]));
   }
   waitForValue(job.userId, job.id, m.fieldName);
-  if (walking) return ctx.reply(`${title}\n\nType the value:`, Markup.inlineKeyboard(walkRow));
-  return ctx.reply(`${title}\n\nType the new value ("-" = leave empty):`, Markup.forceReply().placeholder(m.fieldName));
+  const teachRow = [Markup.button.callback('🎓 Pick it from the PDF', `tc:${job.id}:${index}:0`)];
+  if (walking) return ctx.reply(`${title}\n\nType the value, or pick it from the PDF and I'll remember where it is:`, Markup.inlineKeyboard([teachRow, ...walkRow]));
+  return ctx.reply(
+    `${title}\n\nType the new value ("-" = leave empty), or pick it from the PDF and I'll remember where it is for next time:`,
+    Markup.inlineKeyboard([teachRow]),
+  );
 }
 
 /** Walk through the missing fields one by one; the PDF is sent once at the end. */
@@ -304,6 +309,59 @@ async function showLibrary(ctx: Context) {
     `🧩 ${list.length} template(s). For each PDF I use the one that finds the most values.\n\n${lines.join('\n')}\n\nSend another template .json to add it.`,
     Markup.inlineKeyboard(rows),
   );
+}
+
+/* ---------- teach: tap the value in the PDF, the template learns the rule ---------- */
+
+const PER_PAGE = 10;
+
+async function showSegments(ctx: Context, job: Job, fieldIndex: number, page: number) {
+  const m = editableFields(job)[fieldIndex];
+  if (!m) return;
+  const segs = allSegments(job.prepared.source);
+  const pages = Math.max(1, Math.ceil(segs.length / PER_PAGE));
+  const p = Math.min(Math.max(0, page), pages - 1);
+  const rows = segs.slice(p * PER_PAGE, (p + 1) * PER_PAGE).map((x, i) => {
+    const label = x.seg.text.length > 48 ? `${x.seg.text.slice(0, 45)}…` : x.seg.text;
+    return [Markup.button.callback(label, `ts:${job.id}:${fieldIndex}:${p * PER_PAGE + i}`)];
+  });
+  const nav = [
+    ...(p > 0 ? [Markup.button.callback('◀ Back', `tc:${job.id}:${fieldIndex}:${p - 1}`)] : []),
+    ...(p < pages - 1 ? [Markup.button.callback(`More ▶ (${p + 1}/${pages})`, `tc:${job.id}:${fieldIndex}:${p + 1}`)] : []),
+  ];
+  const text = `🎓 Tap the value for ${m.fieldName} (text of ${job.sourceName}, top to bottom):`;
+  const markup = Markup.inlineKeyboard([...rows, ...(nav.length ? [nav] : [])]);
+  // page through by editing the same message
+  if (ctx.callbackQuery && page !== 0) return ctx.editMessageText(text, markup).catch(() => ctx.reply(text, markup));
+  return ctx.reply(text, markup);
+}
+
+async function teach(ctx: Context, job: Job, fieldIndex: number, segIndex: number) {
+  const m = editableFields(job)[fieldIndex];
+  const picked = allSegments(job.prepared.source)[segIndex];
+  if (!m || !picked) return;
+  const { rule, how } = learnRule(job.prepared.source, picked);
+  const template = structuredClone(job.prepared.template);
+  template.mappings = template.mappings.map((x) => (x.fieldName === m.fieldName ? { ...x, rule } : x));
+  template.updatedAt = new Date().toISOString();
+  try {
+    await saveTemplate(JSON.stringify(template));
+    job.prepared = await switchTemplate(job.prepared, template.id);
+  } catch (e) {
+    return ctx.reply(`❌ Could not update the template: ${errText(e)}`);
+  }
+  delete job.overrides[m.fieldName];
+  job.ahead = undefined;
+  waitForName(job.userId, undefined);
+  await ctx.reply(
+    `🎓 Learned: ${m.fieldName} = ${how}.\nFound here: “${job.prepared.values[m.fieldName] ?? ''}”. Saved in “${template.name}” for every future PDF.`,
+  );
+  if (job.walk?.length) {
+    job.walk = job.walk.filter((f) => f !== m.fieldName);
+    return nextMissing(ctx, job);
+  }
+  if (job.jobName) return finish(ctx, job, job.jobName);
+  return askName(ctx, job);
 }
 
 /* ---------- batch: several PDFs sent together (one album) ---------- */
@@ -559,6 +617,20 @@ export function createBot(token = config.token): Telegraf {
     job.walk = [];
     await ctx.editMessageReplyMarkup(undefined).catch(() => {});
     return nextMissing(ctx, job);
+  });
+
+  // teach: browse the PDF text / pick a piece
+  bot.action(/^tc:(\w+):(\d+):(\d+)$/, async (ctx) => {
+    const job = await findJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'This job is gone, send the PDF again.').catch(() => {});
+    if (job) return showSegments(ctx, job, Number(ctx.match[2]), Number(ctx.match[3]));
+  });
+  bot.action(/^ts:(\w+):(\d+):(\d+)$/, async (ctx) => {
+    const job = await findJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? 'Learning…' : 'This job is gone, send the PDF again.').catch(() => {});
+    if (!job) return;
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    return teach(ctx, job, Number(ctx.match[2]), Number(ctx.match[3]));
   });
 
   // result card: fix a value

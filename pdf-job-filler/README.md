@@ -116,6 +116,9 @@ Using it:
   are still choosing, so tapping it answers instantly (the card shows ⚡ the time it took).
 - **🧩 Fill N missing**: when fields were not found, the bot asks for them one after another (type, tap an
   option or ⏭ Skip) and sends one complete PDF at the end.
+- **🎓 Teach from your phone**: on any field prompt tap *Pick it from the PDF*, then tap the right text. The bot
+  works out a rule (text next to / under a label, or that spot on the page), checks it, and saves it in the
+  template, so every next PDF gets that field automatically.
 - **✏️ Fix a value**: pick a field, type the right value (dropdowns and checkboxes get buttons) and the
   corrected PDF comes straight back.
 

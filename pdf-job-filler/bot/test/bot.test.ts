@@ -436,3 +436,61 @@ test('batch of one behaves like a single PDF', async () => {
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(sent()[0]!.payload.document.filename, 'Solo.pdf');
 });
+
+test('teach: learnRule finds a rule that works on other PDFs too', async () => {
+  const { allSegments, learnRule } = await import('../src/teach.ts');
+  const { extractSource, applyRule } = await import('../../shared/src/index.ts');
+  const { pdfjs, nodePdfjsOptions } = await import('../../shared/src/node.ts');
+  const a = await extractSource(pdfjs, files['src.pdf']!, nodePdfjsOptions);
+  const b = await extractSource(pdfjs, files['src2.pdf']!, nodePdfjsOptions);
+  const pick = (t: string) => allSegments(a).find((x) => x.seg.text === t)!;
+  const cases: [string, RegExp, string][] = [
+    ['Maria Popescu', /next to "Client"/, 'John Smith'],
+    ['Str. Lalelelor 12, Brasov', /under "Site address"/, '221B Baker Street, London'],
+    ['Total amount: EUR 4,850.00', /after "Total amount"/, 'EUR 12,300.50'],
+    ['03.11.2026', /next to "Date"/, '07.11.2026'],
+  ];
+  for (const [text, how, other] of cases) {
+    const learned = learnRule(a, pick(text));
+    assert.match(learned.how, how, text);
+    assert.equal(applyRule(b, learned.rule), other, `${text} on the second PDF`);
+  }
+  assert.equal(learnRule(a, pick('WORK ORDER')).rule.type, 'position');
+});
+
+test('teach: pick the value once, every next PDF gets it', async () => {
+  const tpl = JSON.parse(new TextDecoder().decode(files['tpl.json']));
+  tpl.mappings = tpl.mappings.map((m: any) => (m.fieldName === 'Phone' ? { ...m, rule: { type: 'label', label: 'Telephone' } } : m));
+  await fs.writeFile(process.env.TEMPLATE_PATH!, JSON.stringify(tpl));
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'Teach Job') as any);
+  await bot.handleUpdate(tap(42, buttons(sent()[0]).find((b) => b.text.startsWith('🧩'))!.callback_data) as any);
+  assert.match(lastText(), /Phone — not found/);
+  const teachBtn = buttons(sent('sendMessage').at(-1)).find((b) => b.text.startsWith('🎓'))!;
+  calls = [];
+  await bot.handleUpdate(tap(42, teachBtn.callback_data) as any);
+  let list = buttons(sent('sendMessage').at(-1));
+  assert.equal(list[0]!.text, 'WORK ORDER');
+  // page forward until the phone number shows up
+  let phone = list.find((b) => b.text === '+40 721 000 111');
+  for (let i = 0; !phone && i < 5; i++) {
+    const more = list.find((b) => b.text.startsWith('More'))!;
+    calls = [];
+    await bot.handleUpdate(tap(42, more.callback_data) as any);
+    const edited = calls.find((c) => c.method === 'editMessageText')!;
+    list = buttons(edited);
+    phone = list.find((b) => b.text === '+40 721 000 111');
+  }
+  assert.ok(phone);
+  calls = [];
+  await bot.handleUpdate(tap(42, phone!.callback_data) as any);
+  assert.match(sent('sendMessage')[0]!.payload.text, /Learned: Phone = the text next to "Phone"/);
+  let form = await filledForm(sent()[0]!);
+  assert.equal(form.getTextField('Phone').getText(), '+40 721 000 111');
+
+  // the template file now has the rule: the second PDF gets its own phone number
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('src2.pdf'), caption: 'Next Job' }) as any);
+  form = await filledForm(sent()[0]!);
+  assert.equal(form.getTextField('Phone').getText(), '+44 20 7946 0000');
+});
