@@ -110,6 +110,8 @@ Using it:
   that finds the most values (it tells you which, e.g. `9/10 found`). **🔄 Other template** switches with one tap.
 - **Fast**: the bot warms up at start, caches the template/form/font, and fills the top suggestion while you
   are still choosing, so tapping it answers instantly (the card shows ⚡ the time it took).
+- **🧩 Fill N missing**: when fields were not found, the bot asks for them one after another (type, tap an
+  option or ⏭ Skip) and sends one complete PDF at the end.
 - **✏️ Fix a value**: pick a field, type the right value (dropdowns and checkboxes get buttons) and the
   corrected PDF comes straight back.
 

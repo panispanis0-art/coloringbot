@@ -330,3 +330,39 @@ test('template library: best template picked per PDF, switch with one tap, delet
   await bot.handleUpdate(tap(42, del.find((d) => d.callback_data === 'td:invoicetpl1')!.callback_data) as any);
   assert.match(lastText(), /1 template\(s\)/);
 });
+
+test('fill the gaps: walk through missing fields, skip one, get one complete PDF', async () => {
+  const tpl = JSON.parse(new TextDecoder().decode(files['tpl.json']));
+  tpl.mappings = tpl.mappings.map((m: any) =>
+    m.fieldName === 'OrderDate' ? { ...m, rule: { type: 'label', label: 'Delivery date' } } :
+    m.fieldName === 'Total' ? { ...m, rule: { type: 'regex', pattern: 'Grand total:\\s*(\\S+)' } } :
+    m.fieldName === 'Priority' ? { ...m, rule: { type: 'label', label: 'Urgency' } } : m,
+  );
+  await fs.writeFile(process.env.TEMPLATE_PATH!, JSON.stringify(tpl));
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'Gap Job') as any);
+  const card = sent()[0]!;
+  assert.match(card.payload.caption, /OrderDate: ❌/);
+  const gap = buttons(card)[0]!;
+  assert.equal(gap.text, '🧩 Fill 3 missing');
+
+  calls = [];
+  await bot.handleUpdate(tap(42, gap.callback_data) as any);
+  assert.match(lastText(), /🧩 1\/3 · OrderDate — not found in the PDF/);
+  await bot.handleUpdate(text(42, '05.11.2026') as any);
+  assert.match(lastText(), /🧩 2\/3 · Total/);
+  assert.equal(sent().length, 0, 'no PDF in the middle of the walk');
+  const skip = buttons(sent('sendMessage').at(-1)).find((b) => b.text === '⏭ Skip')!;
+  await bot.handleUpdate(tap(42, skip.callback_data) as any);
+  assert.match(lastText(), /🧩 3\/3 · Priority/);
+  const high = buttons(sent('sendMessage').at(-1)).find((b) => b.text === 'High')!;
+  await bot.handleUpdate(tap(42, high.callback_data) as any);
+
+  assert.equal(sent().length, 1);
+  const form = await filledForm(sent()[0]!);
+  assert.equal(form.getTextField('OrderDate').getText(), '05.11.2026');
+  assert.equal(form.getTextField('Total').getText(), undefined);
+  assert.deepEqual(form.getDropdown('Priority').getSelected(), ['High']);
+  // skipped field is not counted as missing any more
+  assert.ok(!buttons(sent()[0]).some((b) => b.text.startsWith('🧩')));
+});

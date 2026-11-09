@@ -137,8 +137,16 @@ export function resultCaption(
   return out;
 }
 
+function missingFields(job: Job): string[] {
+  return editableFields(job)
+    .map((m) => m.fieldName)
+    .filter((f) => !currentValue(job, f) && !job.skipped?.includes(f));
+}
+
 function resultButtons(job: Job) {
+  const missing = missingFields(job).length;
   return Markup.inlineKeyboard([
+    ...(missing ? [[Markup.button.callback(`🧩 Fill ${missing} missing`, `mf:${job.id}`)]] : []),
     [Markup.button.callback('✏️ Fix a value', `fx:${job.id}`)],
     [
       Markup.button.callback(isFlat(job) ? '📝 Editable copy' : '🔒 Flattened copy', `fl:${job.id}`),
@@ -226,24 +234,47 @@ async function askFieldValue(ctx: Context, job: Job, index: number) {
   if (!m) return;
   const info = job.prepared.fields.find((f) => f.name === m.fieldName);
   const now = currentValue(job, m.fieldName);
-  const nowText = now ? `Now: ${now}` : 'Now: empty';
+  const walking = !!job.walk?.length;
+  const step = walking ? `🧩 ${job.walkTotal! - job.walk!.length + 1}/${job.walkTotal} · ` : '';
+  const title = `${step}${m.fieldName} — ${now ? `Now: ${now}` : walking ? 'not found in the PDF' : 'Now: empty'}`;
+  const walkRow = walking
+    ? [[Markup.button.callback('⏭ Skip', `sk:${job.id}`), Markup.button.callback('✋ Done for now', `st:${job.id}`)]]
+    : [];
   if (info?.type === 'checkbox') {
     return ctx.reply(
-      `${m.fieldName} — ${nowText}`,
-      Markup.inlineKeyboard([[Markup.button.callback('☑️ Tick', `fo:${job.id}:${index}:1`), Markup.button.callback('⬜ Untick', `fo:${job.id}:${index}:0`)]]),
+      title,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('☑️ Tick', `fo:${job.id}:${index}:1`), Markup.button.callback('⬜ Untick', `fo:${job.id}:${index}:0`)],
+        ...walkRow,
+      ]),
     );
   }
   if (info?.options?.length) {
     const opts = info.options.slice(0, 40).map((o, oi) => [Markup.button.callback(o, `fo:${job.id}:${index}:${oi}`)]);
-    return ctx.reply(`${m.fieldName} — ${nowText}\nChoose:`, Markup.inlineKeyboard(opts));
+    return ctx.reply(`${title}\nChoose:`, Markup.inlineKeyboard([...opts, ...walkRow]));
   }
   waitForValue(job.userId, job.id, m.fieldName);
-  return ctx.reply(`${m.fieldName} — ${nowText}\n\nType the new value ("-" = leave empty):`, Markup.forceReply().placeholder(m.fieldName));
+  if (walking) return ctx.reply(`${title}\n\nType the value:`, Markup.inlineKeyboard(walkRow));
+  return ctx.reply(`${title}\n\nType the new value ("-" = leave empty):`, Markup.forceReply().placeholder(m.fieldName));
+}
+
+/** Walk through the missing fields one by one; the PDF is sent once at the end. */
+async function nextMissing(ctx: Context, job: Job) {
+  const field = job.walk?.[0];
+  if (field) return askFieldValue(ctx, job, editableFields(job).findIndex((m) => m.fieldName === field));
+  job.walk = undefined;
+  waitForName(job.userId, undefined);
+  if (job.jobName) return finish(ctx, job, job.jobName);
+  return askName(ctx, job);
 }
 
 async function setValue(ctx: Context, job: Job, field: string, value: string) {
   job.overrides[field] = value;
   waitForName(job.userId, undefined);
+  if (job.walk?.length) {
+    job.walk = job.walk.filter((f) => f !== field);
+    return nextMissing(ctx, job);
+  }
   if (job.jobName) return finish(ctx, job, job.jobName);
   return askName(ctx, job);
 }
@@ -398,6 +429,33 @@ export function createBot(token = config.token): Telegraf {
     await ctx.answerCbQuery().catch(() => {});
     waitForName(job.userId, job.id);
     return ctx.reply(`New Job Name for ${job.sourceName}?`, Markup.forceReply().placeholder(job.jobName ?? 'Job Name'));
+  });
+
+  // result card: fill the missing fields one after another
+  bot.action(/^mf:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
+    if (!job) return;
+    job.walk = missingFields(job);
+    job.walkTotal = job.walk.length;
+    return nextMissing(ctx, job);
+  });
+  bot.action(/^sk:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    await ctx.answerCbQuery().catch(() => {});
+    const field = job?.walk?.shift();
+    if (!job || !field) return;
+    (job.skipped ??= []).push(field);
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    return nextMissing(ctx, job);
+  });
+  bot.action(/^st:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    await ctx.answerCbQuery().catch(() => {});
+    if (!job?.walk) return;
+    job.walk = [];
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    return nextMissing(ctx, job);
   });
 
   // result card: fix a value

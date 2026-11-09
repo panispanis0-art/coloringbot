@@ -13,6 +13,11 @@ export interface Job {
   overrides: Record<string, string>;
   flatten?: boolean;
   suggestions: string[];
+  /** missing fields still to ask for (guided fill) */
+  walk?: string[] | undefined;
+  walkTotal?: number;
+  /** fields the user chose to leave empty */
+  skipped?: string[];
   /** result filled ahead for the top suggestion (see fillAhead) */
   ahead?: { key: string; promise: Promise<any> } | undefined;
 }
