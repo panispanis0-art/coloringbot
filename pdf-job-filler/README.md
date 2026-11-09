@@ -101,6 +101,9 @@ Templates live in the browser of each device. Move them with **Templates → Exp
 
 Using it:
 
+- **First time?** Send `/start`: with no template yet, tap **▶️ Show me with a demo** — the bot installs a demo
+  template and fills a sample work order in front of you. A menu at the bottom of the chat (🕘 History,
+  🧩 Templates, ⚡ Autoname, ❓ Help) means no commands to remember.
 - **Just send the source PDF.** The bot reads it straight away and asks for the Job Name with one-tap
   suggestions taken from the PDF itself (client, order number, file name…). Tap one or type your own.
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).

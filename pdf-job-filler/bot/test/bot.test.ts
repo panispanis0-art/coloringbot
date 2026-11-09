@@ -644,3 +644,37 @@ test('batch status counts up live', async () => {
   const r = calls.filter((c) => c.method === 'setMessageReaction').map((c) => c.payload.reaction[0].emoji);
   assert.deepEqual(r, ['👀', '👀', '👍', '👍']);
 });
+
+test('onboarding: /start without templates runs a live demo; menu at the bottom works', async () => {
+  const bot = makeBot();
+  await fs.rm(process.env.TEMPLATE_PATH!, { force: true });
+  await bot.handleUpdate(text(42, '/start') as any);
+  const welcome = sent('sendMessage')[0]!;
+  assert.deepEqual(welcome.payload.reply_markup.keyboard.flat(), ['🕘 History', '🧩 Templates', '⚡ Autoname', '❓ Help']);
+  assert.equal(welcome.payload.reply_markup.is_persistent, true);
+  const demo = buttons(sent('sendMessage').at(-1))[0]!;
+  assert.equal(demo.text, '▶️ Show me with a demo');
+
+  calls = [];
+  await bot.handleUpdate(tap(42, demo.callback_data) as any);
+  assert.equal(sent()[0]!.payload.document.filename, 'work-order-example.pdf');
+  const ask = sent('sendMessage').find((c) => /What's the Job Name/.test(c.payload.text))!;
+  assert.match(ask.payload.text, /Demo — job sheet — 6\/6 found/);
+  calls = [];
+  await bot.handleUpdate(tap(42, buttons(ask)[0]!.callback_data) as any);
+  const form = await filledForm(sent()[0]!);
+  assert.equal(form.getTextField('SiteAddress').getText(), 'Str. Lalelelor 12, Brasov');
+  assert.equal(form.getTextField('Total').getText(), '4,850.00');
+
+  // home screen now shows the numbers; menu buttons act like commands
+  calls = [];
+  await bot.handleUpdate(text(42, '/start') as any);
+  assert.match(lastText(), /🧩 1 template\(s\)\n📄 1 PDF\(s\) filled so far/);
+  calls = [];
+  await bot.handleUpdate(text(42, '🕘 History') as any);
+  assert.match(lastText(), /Your last jobs/);
+  await bot.handleUpdate(text(42, '🧩 Templates') as any);
+  assert.match(lastText(), /1 template\(s\)/);
+  await bot.handleUpdate(text(42, '⚡ Autoname') as any);
+  assert.match(lastText(), /autopilot off/);
+});

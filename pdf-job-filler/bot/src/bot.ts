@@ -1,7 +1,10 @@
 import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { bytesToBase64, emptyTemplate, listFormFields, type MappingRule } from '../../shared/src/index.ts';
 import { zipSync } from 'fflate';
-import { config } from './config.ts';
+import { config, PROJECT_DIR } from './config.ts';
 import {
   applyNamePattern,
   deleteTemplate,
@@ -68,8 +71,11 @@ async function createJob(ctx: Context, doc: Doc, progress?: Progress): Promise<J
   if (!isPdf(doc)) throw new Error(`${doc.file_name ?? 'That file'} is not a PDF.`);
   const sourceBytes = await download(ctx, doc);
   await progress?.step(`🔎 Reading ${doc.file_name ?? 'the PDF'}…`);
+  return createJobFromBytes(ctx, sourceBytes, doc.file_name ?? 'source.pdf');
+}
+
+async function createJobFromBytes(ctx: Context, sourceBytes: Uint8Array, sourceName: string): Promise<Job> {
   const prepared = await prepareJob(sourceBytes);
-  const sourceName = doc.file_name ?? 'source.pdf';
   const job = addJob({
     id: newJobId(),
     userId: ctx.from!.id,
@@ -339,6 +345,70 @@ async function showLibrary(ctx: Context) {
   );
 }
 
+/* ---------- home screen, menu and demo ---------- */
+
+export const MENU_LABELS = { history: '🕘 History', templates: '🧩 Templates', autoname: '⚡ Autoname', help: '❓ Help' } as const;
+const MENU = Markup.keyboard([
+  [MENU_LABELS.history, MENU_LABELS.templates],
+  [MENU_LABELS.autoname, MENU_LABELS.help],
+])
+  .resize()
+  .persistent()
+  .placeholder('Send a PDF…');
+
+async function home(ctx: Context) {
+  const list = await listTemplates();
+  const jobs = (await history(ctx.from!.id, 200)).filter((h) => h.fileId).length;
+  const auto = list.filter((t) => t.template.options.jobNamePattern).length;
+  const hi = `👋 Hi ${ctx.from?.first_name ?? ''}!`;
+  if (!list.length) {
+    await ctx.reply(`${hi} I fill PDF forms from the PDFs you send me.`, MENU);
+    return ctx.reply(
+      'You have no template yet. Want to see how it works first? I will set up a demo form and fill it from a sample work order — takes 10 seconds.',
+      Markup.inlineKeyboard([[Markup.button.callback('▶️ Show me with a demo', 'demo')]]),
+    );
+  }
+  return ctx.reply(
+    `${hi}\n\n🧩 ${list.length} template(s)${auto ? ` · ⚡ autopilot on for ${auto}` : ''}\n📄 ${jobs} PDF(s) filled so far\n\nJust send me a source PDF (or several at once).`,
+    MENU,
+  );
+}
+
+/** Install the demo template (sample job sheet) and run a real job on the sample work order. */
+async function runDemo(ctx: Context) {
+  const dir = path.join(PROJECT_DIR, 'samples');
+  try {
+    const form = new Uint8Array(await fs.readFile(path.join(dir, 'target-form.pdf')));
+    const source = new Uint8Array(await fs.readFile(path.join(dir, 'source-example.pdf')));
+    const t = emptyTemplate('Demo — job sheet', await listFormFields(form));
+    t.id = 'demojobsheet';
+    t.targetFormName = 'target-form.pdf';
+    t.targetFormBase64 = bytesToBase64(form);
+    const rules: Record<string, MappingRule> = {
+      JobName: { type: 'jobName' },
+      OrderNumber: { type: 'label', label: 'Order No' },
+      ClientName: { type: 'label', label: 'Client' },
+      Phone: { type: 'label', label: 'Phone' },
+      SiteAddress: { type: 'label', label: 'Site address', valueOn: 'below' },
+      OrderDate: { type: 'label', label: 'Date' },
+      Total: { type: 'regex', pattern: 'Total amount:\\s*EUR\\s*([\\d.,]+)' },
+      FilledOn: { type: 'date' },
+      Priority: { type: 'static', value: 'Normal' },
+    };
+    t.mappings = t.mappings.map((m) => ({ ...m, rule: rules[m.fieldName] ?? m.rule }));
+    await saveTemplate(JSON.stringify(t));
+    await ctx.reply('✅ Demo template installed. Here is a sample work order, as if you had sent it:');
+    await ctx.replyWithDocument({ source: Buffer.from(source), filename: 'work-order-example.pdf' });
+    const job = await createJobFromBytes(ctx, source, 'work-order-example.pdf');
+    await askName(ctx, job);
+    await ctx.reply(
+      '👆 Tap a name and watch the form fill. Then: export your own template from the web app (Templates → Export) and send me the .json — remove the demo any time in 🧩 Templates.',
+    );
+  } catch (e) {
+    await ctx.reply(`❌ The demo could not start: ${errText(e)}`);
+  }
+}
+
 /* ---------- autopilot naming ---------- */
 
 /** The Job Name from the template's pattern, or undefined when there is none / it comes out empty. */
@@ -533,8 +603,13 @@ export function createBot(token = config.token): Telegraf {
     return next();
   });
 
-  bot.start((ctx) => ctx.reply(`Hi ${ctx.from.first_name ?? ''}! Your user id ${ctx.from.id} is allowed.\n\n${HELP}`));
-  bot.help((ctx) => ctx.reply(HELP));
+  bot.start((ctx) => home(ctx));
+  bot.help((ctx) => ctx.reply(HELP, MENU));
+  bot.action('demo', async (ctx) => {
+    await ctx.answerCbQuery('Setting up the demo…').catch(() => {});
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    return runDemo(ctx);
+  });
 
   bot.command(['template', 'templates'], async (ctx) => {
     const reply = (ctx.message as any).reply_to_message;
@@ -561,15 +636,16 @@ export function createBot(token = config.token): Telegraf {
     );
   });
 
-  bot.command('history', async (ctx) => {
-    const list = await history(ctx.from.id, 10);
+  const showHistory = async (ctx: Context) => {
+    const list = await history(ctx.from!.id, 10);
     if (!list.length) return ctx.reply('No jobs yet. Send me a source PDF to start.');
     const day = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const rows = list.map((h) => [
       Markup.button.callback(`${h.jobName ? '📄' : '⏳'} ${h.jobName ?? h.sourceName} · ${day(h.updatedAt)}`.slice(0, 60), `hj:${h.id}`),
     ]);
     return ctx.reply('🕘 Your last jobs — tap one to get its PDF again (then rename, fix or flatten as usual).', Markup.inlineKeyboard(rows));
-  });
+  };
+  bot.command('history', showHistory);
   bot.action(/^hj:(\w+)$/, async (ctx) => {
     const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery(job ? undefined : 'That job is gone.').catch(() => {});
@@ -724,9 +800,9 @@ export function createBot(token = config.token): Telegraf {
   });
 
   // /autoname [pattern | off]
-  bot.command('autoname', async (ctx) => {
-    const arg = commandArgs(ctx.message.text, 'autoname') ?? '';
-    const last = (await history(ctx.from.id, 1))[0];
+  const autonameCmd = async (ctx: Context) => {
+    const arg = commandArgs((ctx.message as { text?: string } | undefined)?.text, 'autoname') ?? '';
+    const last = (await history(ctx.from!.id, 1))[0];
     const lastJob = last && (await findJob(last.id));
     const list = await listTemplates();
     const target = lastJob?.prepared.template ?? list[0]?.template;
@@ -747,7 +823,8 @@ export function createBot(token = config.token): Telegraf {
     const t = await setNamePattern(target.id, arg);
     const example = lastJob ? applyNamePattern(arg, { ...lastJob.prepared, template: t }, lastJob.sourceName) : '';
     return ctx.reply(`⚡ Autopilot on for “${t.name}”: ${arg}${example ? `\nYour last PDF would be: ${example}` : ''}`);
-  });
+  };
+  bot.command('autoname', autonameCmd);
 
   // result card: flattened <-> editable copy
   bot.action(/^fl:(\w+)$/, async (ctx) => {
@@ -836,6 +913,11 @@ export function createBot(token = config.token): Telegraf {
   bot.on(message('text'), async (ctx) => {
     const text = ctx.message.text.trim();
     if (text.startsWith('/')) return;
+    // the menu at the bottom of the chat
+    if (text === MENU_LABELS.history) return showHistory(ctx);
+    if (text === MENU_LABELS.templates) return showLibrary(ctx);
+    if (text === MENU_LABELS.autoname) return autonameCmd(ctx);
+    if (text === MENU_LABELS.help) return ctx.reply(HELP, MENU);
     const pending = pendingInput(ctx.from.id);
     if (!pending) return ctx.reply('Send me a source PDF and I will fill the form. /help');
     if (pending.field) return setValue(ctx, pending.job, pending.field, text === '-' ? '' : text);
