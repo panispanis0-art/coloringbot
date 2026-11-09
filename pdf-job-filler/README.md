@@ -66,6 +66,11 @@ pdf-job-filler/
 3. Open the `pdf-job-filler` folder and double-click **`setup.bat`**.
    It installs the packages, creates `.env` from `.env.example` and builds the web app.
 
+### Updating later
+
+Double-click **`update.bat`**. It downloads the newest version, keeps your `.env` settings, templates and saved
+jobs, and installs what the new version needs. Then start the bot again with `run-bot.bat`.
+
 ### Web app on your PC
 
 - Double-click **`run-web.bat`** → opens <http://localhost:4173>.
