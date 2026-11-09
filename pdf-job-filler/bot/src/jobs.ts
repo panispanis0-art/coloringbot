@@ -17,8 +17,12 @@ export interface Job {
 
 const MAX_JOBS = 50;
 const jobs = new Map<string, Job>();
-/** user id -> job waiting for a Job Name typed as text */
-const awaitingName = new Map<number, string>();
+/** What the next typed text from a user means: a Job Name, or a new value for one field. */
+export interface Awaiting {
+  jobId: string;
+  field?: string;
+}
+const awaiting = new Map<number, Awaiting>();
 
 export function newJobId(): string {
   let id: string;
@@ -36,17 +40,28 @@ export function addJob(job: Job): Job {
 export const getJob = (id: string) => jobs.get(id);
 
 export function waitForName(userId: number, jobId: string | undefined) {
-  if (jobId) awaitingName.set(userId, jobId);
-  else awaitingName.delete(userId);
+  if (jobId) awaiting.set(userId, { jobId });
+  else awaiting.delete(userId);
+}
+
+export function waitForValue(userId: number, jobId: string, field: string) {
+  awaiting.set(userId, { jobId, field });
+}
+
+/** The job and field the user's next text belongs to, if any. */
+export function pendingInput(userId: number): { job: Job; field?: string } | undefined {
+  const a = awaiting.get(userId);
+  const job = a && jobs.get(a.jobId);
+  return job ? { job, ...(a.field ? { field: a.field } : {}) } : undefined;
 }
 
 export function jobAwaitingName(userId: number): Job | undefined {
-  const id = awaitingName.get(userId);
-  return id ? jobs.get(id) : undefined;
+  const p = pendingInput(userId);
+  return p && !p.field ? p.job : undefined;
 }
 
 /** for tests */
 export function clearJobs() {
   jobs.clear();
-  awaitingName.clear();
+  awaiting.clear();
 }

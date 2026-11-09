@@ -4,6 +4,8 @@ import {
   applyMappings,
   extractSource,
   fillForm,
+  listFormFields,
+  type FormFieldInfo,
   parseTemplate,
   base64ToBytes,
   describeRule,
@@ -44,6 +46,18 @@ export interface Prepared {
   source: SourceDoc;
   /** values found in the source (without the Job Name) */
   values: Record<string, string>;
+  /** the form's fields (types, dropdown options) */
+  fields: FormFieldInfo[];
+}
+
+async function loadFormBytes(template: Template): Promise<Uint8Array> {
+  const formBytes =
+    (await readOptional(config.formPath)) ??
+    (template.targetFormBase64 ? base64ToBytes(template.targetFormBase64) : undefined);
+  if (!formBytes) {
+    throw new Error('The template has no form inside. Export it again with "include form", or set FORM_PATH in .env.');
+  }
+  return formBytes;
 }
 
 export async function prepareJob(sourceBytes: Uint8Array): Promise<Prepared> {
@@ -52,7 +66,8 @@ export async function prepareJob(sourceBytes: Uint8Array): Promise<Prepared> {
   if (!source.fullText.trim()) {
     throw new Error('No text found in this PDF. Is it a scan? Only text-based PDFs work.');
   }
-  return { template, source, values: applyMappings(source, template.mappings, {}) };
+  const fields = await listFormFields(await loadFormBytes(template));
+  return { template, source, values: applyMappings(source, template.mappings, {}), fields };
 }
 
 export interface RenderInput {
@@ -74,12 +89,7 @@ export async function renderJob({ prepared, jobName, overrides = {}, flatten }: 
   const name = jobName.trim();
   if (!name) throw new Error('Job Name is empty.');
   const { template, source } = prepared;
-  const formBytes =
-    (await readOptional(config.formPath)) ??
-    (template.targetFormBase64 ? base64ToBytes(template.targetFormBase64) : undefined);
-  if (!formBytes) {
-    throw new Error('The template has no form inside. Export it again with "include form", or set FORM_PATH in .env.');
-  }
+  const formBytes = await loadFormBytes(template);
   const values = { ...applyMappings(source, template.mappings, { jobName: name }), ...overrides };
   const res = await fillForm(formBytes, values, {
     flatten: flatten ?? config.flatten ?? template.options.flatten,

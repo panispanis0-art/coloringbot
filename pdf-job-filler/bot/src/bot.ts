@@ -2,7 +2,7 @@ import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { config } from './config.ts';
 import { loadTemplate, prepareJob, renderJob, saveTemplate, suggestJobNames, templateSummary } from './pdf.ts';
-import { addJob, getJob, jobAwaitingName, newJobId, waitForName, type Job } from './jobs.ts';
+import { addJob, getJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
 export const HELP = [
   'PDF Job Filler bot',
@@ -109,6 +109,7 @@ export function resultCaption(job: Job, fileName: string, values: Record<string,
 
 function resultButtons(job: Job) {
   return Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ Fix a value', `fx:${job.id}`)],
     [
       Markup.button.callback(isFlat(job) ? '📝 Editable copy' : '🔒 Flattened copy', `fl:${job.id}`),
       Markup.button.callback('🔁 Rename', `rn:${job.id}`),
@@ -131,6 +132,51 @@ async function finish(ctx: Context, job: Job, jobName: string) {
     console.error(e);
     await ctx.reply(`❌ ${errText(e)}`);
   }
+}
+
+/** Fields the user can correct: everything mapped, in form order. */
+function editableFields(job: Job) {
+  return job.prepared.template.mappings.filter((m) => m.rule.type !== 'skip' && m.rule.type !== 'jobName');
+}
+
+function currentValue(job: Job, field: string): string {
+  return job.overrides[field] ?? job.prepared.values[field] ?? '';
+}
+
+async function showFieldPicker(ctx: Context, job: Job) {
+  const rows = editableFields(job).map((m, i) => {
+    const v = currentValue(job, m.fieldName);
+    const label = `${v ? '' : '❌ '}${m.fieldName}${v ? `: ${v.replace(/\n/g, ' ').slice(0, 30)}` : ''}`;
+    return [Markup.button.callback(label, `fe:${job.id}:${i}`)];
+  });
+  await ctx.reply('Which value should I change?', Markup.inlineKeyboard(rows));
+}
+
+async function askFieldValue(ctx: Context, job: Job, index: number) {
+  const m = editableFields(job)[index];
+  if (!m) return;
+  const info = job.prepared.fields.find((f) => f.name === m.fieldName);
+  const now = currentValue(job, m.fieldName);
+  const nowText = now ? `Now: ${now}` : 'Now: empty';
+  if (info?.type === 'checkbox') {
+    return ctx.reply(
+      `${m.fieldName} — ${nowText}`,
+      Markup.inlineKeyboard([[Markup.button.callback('☑️ Tick', `fo:${job.id}:${index}:1`), Markup.button.callback('⬜ Untick', `fo:${job.id}:${index}:0`)]]),
+    );
+  }
+  if (info?.options?.length) {
+    const opts = info.options.slice(0, 40).map((o, oi) => [Markup.button.callback(o, `fo:${job.id}:${index}:${oi}`)]);
+    return ctx.reply(`${m.fieldName} — ${nowText}\nChoose:`, Markup.inlineKeyboard(opts));
+  }
+  waitForValue(job.userId, job.id, m.fieldName);
+  return ctx.reply(`${m.fieldName} — ${nowText}\n\nType the new value ("-" = leave empty):`, Markup.forceReply().placeholder(m.fieldName));
+}
+
+async function setValue(ctx: Context, job: Job, field: string, value: string) {
+  job.overrides[field] = value;
+  waitForName(job.userId, undefined);
+  if (job.jobName) return finish(ctx, job, job.jobName);
+  return askName(ctx, job);
 }
 
 async function importTemplate(ctx: Context, d: Doc) {
@@ -228,13 +274,38 @@ export function createBot(token = config.token): Telegraf {
     return ctx.reply(`New Job Name for ${job.sourceName}?`, Markup.forceReply().placeholder(job.jobName ?? 'Job Name'));
   });
 
+  // result card: fix a value
+  bot.action(/^fx:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
+    if (job) return showFieldPicker(ctx, job);
+  });
+  bot.action(/^fe:(\w+):(\d+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
+    if (job) return askFieldValue(ctx, job, Number(ctx.match[2]));
+  });
+  // option / checkbox chosen
+  bot.action(/^fo:(\w+):(\d+):(\d+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    const m = job && editableFields(job)[Number(ctx.match[2])];
+    await ctx.answerCbQuery(m ? undefined : 'This job expired, send the PDF again.').catch(() => {});
+    if (!job || !m) return;
+    const info = job.prepared.fields.find((f) => f.name === m.fieldName);
+    const oi = Number(ctx.match[3]);
+    const value = info?.type === 'checkbox' ? (oi ? 'yes' : '') : (info?.options?.[oi] ?? '');
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    return setValue(ctx, job, m.fieldName, value);
+  });
+
   // typed text while a PDF waits for its Job Name
   bot.on(message('text'), async (ctx) => {
     const text = ctx.message.text.trim();
     if (text.startsWith('/')) return;
-    const job = jobAwaitingName(ctx.from.id);
-    if (!job) return ctx.reply('Send me a source PDF and I will fill the form. /help');
-    return finish(ctx, job, text);
+    const pending = pendingInput(ctx.from.id);
+    if (!pending) return ctx.reply('Send me a source PDF and I will fill the form. /help');
+    if (pending.field) return setValue(ctx, pending.job, pending.field, text === '-' ? '' : text);
+    return finish(ctx, pending.job, text);
   });
 
   bot.catch((err, ctx) => {

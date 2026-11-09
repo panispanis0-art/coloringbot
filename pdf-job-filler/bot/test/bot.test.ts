@@ -80,7 +80,7 @@ before(async () => {
   files['src.pdf'] = new Uint8Array(await fs.readFile(path.join(samples, 'source-example.pdf')));
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   calls = [];
   clearJobs();
 });
@@ -169,18 +169,69 @@ test('result card: values, missing fields, flatten toggle, rename', async () => 
   assert.match(first.payload.caption, /3\/3 fields filled · 📝 editable/);
   assert.match(first.payload.caption, /ClientName: <b>Maria Popescu<\/b>/);
   const b = buttons(first);
-  assert.deepEqual(b.map((x) => x.text), ['🔒 Flattened copy', '🔁 Rename']);
-
-  calls = [];
-  await bot.handleUpdate(tap(42, b[0]!.callback_data) as any);
-  const flat = sent()[0]!;
-  assert.match(flat.payload.caption, /🔒 flattened/);
-  assert.equal((await PDFDocument.load(flat.payload.document.source)).getForm().getFields().length, 0);
-  assert.equal(buttons(flat)[0]!.text, '📝 Editable copy');
+  assert.deepEqual(b.map((x) => x.text), ['✏️ Fix a value', '🔒 Flattened copy', '🔁 Rename']);
 
   calls = [];
   await bot.handleUpdate(tap(42, b[1]!.callback_data) as any);
+  const flat = sent()[0]!;
+  assert.match(flat.payload.caption, /🔒 flattened/);
+  assert.equal((await PDFDocument.load(flat.payload.document.source)).getForm().getFields().length, 0);
+  assert.equal(buttons(flat)[1]!.text, '📝 Editable copy');
+
+  calls = [];
+  await bot.handleUpdate(tap(42, b[2]!.callback_data) as any);
   assert.match(lastText(), /New Job Name/);
   await bot.handleUpdate(text(42, 'Renamed Job') as any);
   assert.equal(sent()[0]?.payload.document.filename, 'Renamed Job.pdf');
+});
+
+test('fix a value: text field by typing, dropdown and checkbox by tapping', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'Fix Job') as any);
+  const fix = buttons(sent()[0]).find((x) => x.text.startsWith('✏️'))!;
+  calls = [];
+  await bot.handleUpdate(tap(42, fix.callback_data) as any);
+  const picker = buttons(sent('sendMessage').at(-1));
+  assert.deepEqual(picker.map((x) => x.text), ['OrderNumber: WO-2026-0147', 'ClientName: Maria Popescu']);
+
+  // text field
+  await bot.handleUpdate(tap(42, picker[1]!.callback_data) as any);
+  assert.match(lastText(), /ClientName — Now: Maria Popescu/);
+  calls = [];
+  await bot.handleUpdate(text(42, 'Ana Ionescu') as any);
+  let form = await filledForm(sent()[0]!);
+  assert.equal(form.getTextField('ClientName').getText(), 'Ana Ionescu');
+  assert.equal(form.getTextField('OrderNumber').getText(), 'WO-2026-0147');
+  assert.match(sent()[0]!.payload.caption, /ClientName: <b>Ana Ionescu<\/b>/);
+});
+
+test('fix a value: options for dropdowns and checkboxes', async () => {
+  const bot = makeBot();
+  // map Priority + Approved so they can be fixed
+  const tpl = JSON.parse(new TextDecoder().decode(files['tpl.json']));
+  tpl.mappings = tpl.mappings.map((m: any) =>
+    m.fieldName === 'Priority' ? { ...m, rule: { type: 'static', value: 'Low' } } :
+    m.fieldName === 'Approved' ? { ...m, rule: { type: 'static', value: '' } } : m,
+  );
+  await fs.writeFile(process.env.TEMPLATE_PATH!, JSON.stringify(tpl));
+  await bot.handleUpdate(pdfMsg(42, 'Opt Job') as any);
+  const jobId = buttons(sent()[0]).find((x) => x.text.startsWith('✏️'))!.callback_data.split(':')[1];
+  const fields = ['OrderNumber', 'ClientName', 'Approved', 'Priority'];
+  calls = [];
+  await bot.handleUpdate(tap(42, `fe:${jobId}:${fields.indexOf('Priority')}`) as any);
+  const opts = buttons(sent('sendMessage').at(-1));
+  assert.deepEqual(opts.map((x) => x.text), ['Low', 'Normal', 'High']);
+  calls = [];
+  await bot.handleUpdate(tap(42, opts[2]!.callback_data) as any);
+  let form = await filledForm(sent()[0]!);
+  assert.deepEqual(form.getDropdown('Priority').getSelected(), ['High']);
+
+  calls = [];
+  await bot.handleUpdate(tap(42, `fe:${jobId}:${fields.indexOf('Approved')}`) as any);
+  const tick = buttons(sent('sendMessage').at(-1));
+  assert.equal(tick[0]!.text, '☑️ Tick');
+  calls = [];
+  await bot.handleUpdate(tap(42, tick[0]!.callback_data) as any);
+  form = await filledForm(sent()[0]!);
+  assert.equal(form.getCheckBox('Approved').isChecked(), true);
 });

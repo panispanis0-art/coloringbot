@@ -106,6 +106,8 @@ Using it:
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 - The PDF comes back with a **result card**: every field with its value (missing ones marked ❌) and buttons
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
+- **✏️ Fix a value**: pick a field, type the right value (dropdowns and checkboxes get buttons) and the
+  corrected PDF comes straight back.
 
 | Command | |
 |---|---|
