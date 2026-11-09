@@ -11,6 +11,7 @@ const samples = path.resolve(import.meta.dirname, '../../samples');
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'pjf-bot-'));
 process.env.ALLOWED_USER_ID = '42';
 process.env.TEMPLATE_PATH = path.join(tmp, 'template.json');
+process.env.TEMPLATES_DIR = path.join(tmp, 'templates');
 process.env.BOT_TOKEN = '123:TEST';
 process.env.PREVIEW = 'false'; // most tests look at the PDF message; the preview test turns it on
 
@@ -85,6 +86,8 @@ before(async () => {
 beforeEach(async () => {
   calls = [];
   clearJobs();
+  await fs.rm(process.env.TEMPLATES_DIR!, { recursive: true, force: true });
+  await fs.writeFile(process.env.TEMPLATE_PATH!, files['tpl.json']!);
 });
 
 test('command parsing', () => {
@@ -107,10 +110,14 @@ test('template upload and /template', async () => {
   const bot = makeBot();
   await fs.rm(process.env.TEMPLATE_PATH!, { force: true });
   await bot.handleUpdate(text(42, '/template') as any);
-  assert.match(lastText(), /No template/);
+  assert.match(lastText(), /No templates yet/);
   calls = [];
   await bot.handleUpdate(msg(42, { document: doc('tpl.json', 'application/json'), caption: '/template' }) as any);
-  assert.match(lastText(), /Template saved[\s\S]*ClientName/);
+  assert.match(lastText(), /Template added: Bot test[\s\S]*ClientName/);
+  // same template again = update, not a second copy
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('tpl.json', 'application/json') }) as any);
+  assert.match(lastText(), /Template updated[\s\S]*1 template\(s\)/);
 });
 
 test('caption "/write Name" and plain caption "Name" fill right away', async () => {
@@ -283,4 +290,43 @@ test('captions never exceed Telegram\'s 1024 characters', async () => {
   assert.ok(cap.length <= 1024, String(cap.length));
   assert.match(cap, /…/);
   assert.equal((cap.match(/<b>/g) ?? []).length, (cap.match(/<\/b>/g) ?? []).length);
+});
+
+test('template library: best template picked per PDF, switch with one tap, delete', async () => {
+  const bot = makeBot();
+  // a second template that reads labels this PDF does not have
+  const other = JSON.parse(new TextDecoder().decode(files['tpl.json']));
+  other.id = 'invoicetpl1';
+  other.name = 'Invoice';
+  other.updatedAt = new Date().toISOString();
+  other.mappings = other.mappings.map((m: any) =>
+    m.fieldName === 'ClientName' ? { ...m, rule: { type: 'label', label: 'Bill to' } } :
+    m.fieldName === 'OrderNumber' ? { ...m, rule: { type: 'label', label: 'Invoice No' } } : m,
+  );
+  files['inv.json'] = new TextEncoder().encode(JSON.stringify(other));
+  await bot.handleUpdate(msg(42, { document: doc('inv.json', 'application/json') }) as any);
+  assert.match(lastText(), /Template added: Invoice[\s\S]*2 template/);
+
+  // the work order PDF picks "Bot test" even though "Invoice" is newer
+  calls = [];
+  await bot.handleUpdate(pdfMsg(42) as any);
+  const ask = sent('sendMessage').at(-1)!;
+  assert.match(ask.payload.text, /Template: Bot test — 2\/2 found \(best match\)/);
+  const other_ = buttons(ask).find((b) => b.text.includes('another template'))!;
+  calls = [];
+  await bot.handleUpdate(tap(42, other_.callback_data) as any);
+  const choices = buttons(sent('sendMessage').at(-1));
+  assert.deepEqual(choices.map((c) => c.text), ['✅ Bot test — 2/2', 'Invoice — 0/2']);
+  calls = [];
+  await bot.handleUpdate(tap(42, choices[1]!.callback_data) as any);
+  assert.match(lastText(), /Template: Invoice — 0\/2 found/);
+
+  // library + delete
+  calls = [];
+  await bot.handleUpdate(text(42, '/templates') as any);
+  assert.match(lastText(), /2 template\(s\)/);
+  const del = buttons(sent('sendMessage').at(-1)).filter((b) => b.text.includes('Delete'));
+  calls = [];
+  await bot.handleUpdate(tap(42, del.find((d) => d.callback_data === 'td:invoicetpl1')!.callback_data) as any);
+  assert.match(lastText(), /1 template\(s\)/);
 });

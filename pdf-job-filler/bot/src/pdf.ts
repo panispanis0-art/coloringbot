@@ -29,22 +29,60 @@ async function cachedFile<T>(file: string, load: (bytes: Buffer) => T | Promise<
   return value;
 }
 
-export async function loadTemplate(): Promise<Template> {
-  try {
-    return await cachedFile(config.templatePath, (b) => parseTemplate(b.toString('utf8')));
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-    throw new Error(
-      `No template yet.\nExport one from the web app (Templates → Export) and send the .json file to me with the caption /template.`,
-    );
-  }
+export interface StoredTemplate {
+  template: Template;
+  file: string;
 }
 
-export async function saveTemplate(json: string): Promise<Template> {
-  const t = parseTemplate(json);
-  await fs.mkdir(path.dirname(config.templatePath), { recursive: true });
-  await fs.writeFile(config.templatePath, JSON.stringify(t, null, 2), 'utf8');
-  return t;
+const NO_TEMPLATE =
+  'No template yet.\nExport one from the web app (Templates → Export) and send me the .json file.';
+
+/** All templates: every .json in TEMPLATES_DIR, plus the single TEMPLATE_PATH file of older setups. */
+export async function listTemplates(): Promise<StoredTemplate[]> {
+  const files: string[] = [];
+  try {
+    for (const f of await fs.readdir(config.templatesDir)) {
+      if (f.toLowerCase().endsWith('.json')) files.push(path.join(config.templatesDir, f));
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+  }
+  if (!files.includes(config.templatePath)) files.push(config.templatePath);
+  const byId = new Map<string, StoredTemplate>();
+  for (const file of files) {
+    try {
+      const template = await cachedFile(file, (b) => parseTemplate(b.toString('utf8')));
+      const prev = byId.get(template.id);
+      if (!prev || prev.template.updatedAt < template.updatedAt) byId.set(template.id, { template, file });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') console.warn(`Skipping template ${file}: ${(e as Error).message}`);
+    }
+  }
+  return [...byId.values()].sort((x, y) => x.template.name.localeCompare(y.template.name));
+}
+
+/** The most recently updated template. */
+export async function loadTemplate(): Promise<Template> {
+  const list = await listTemplates();
+  if (!list.length) throw new Error(NO_TEMPLATE);
+  return list.reduce((a, b) => (b.template.updatedAt > a.template.updatedAt ? b : a)).template;
+}
+
+/** Add a template to the library (same id = replace it). */
+export async function saveTemplate(json: string): Promise<{ template: Template; replaced: boolean }> {
+  const template = parseTemplate(json);
+  const existing = (await listTemplates()).find((s) => s.template.id === template.id);
+  const file =
+    existing?.file ?? path.join(config.templatesDir, safeFileName(`${template.name}-${template.id.slice(0, 6)}`, '.json'));
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(template, null, 2), 'utf8');
+  return { template, replaced: !!existing };
+}
+
+export async function deleteTemplate(id: string): Promise<Template | undefined> {
+  const hit = (await listTemplates()).find((s) => s.template.id === id);
+  if (hit) await fs.rm(hit.file, { force: true });
+  return hit?.template;
 }
 
 async function readOptional(p?: string): Promise<Uint8Array | undefined> {
@@ -63,7 +101,28 @@ export interface Prepared {
   values: Record<string, string>;
   /** the form's fields (types, dropdown options) */
   fields: FormFieldInfo[];
+  /** every template scored on this PDF, best first */
+  ranking: TemplateScore[];
 }
+
+export interface TemplateScore {
+  id: string;
+  name: string;
+  /** rules that read from the PDF and found something */
+  found: number;
+  /** rules that read from the PDF (label, regex, area) */
+  total: number;
+}
+
+const READS_PDF = new Set(['label', 'regex', 'position']);
+
+function score(template: Template, values: Record<string, string>): TemplateScore {
+  const reading = template.mappings.filter((m) => READS_PDF.has(m.rule.type));
+  const found = reading.filter((m) => values[m.fieldName]).length;
+  return { id: template.id, name: template.name, found, total: reading.length };
+}
+
+const ratio = (s: TemplateScore) => (s.total ? s.found / s.total : 0);
 
 async function loadForm(template: Template): Promise<{ bytes: Uint8Array; fields: FormFieldInfo[] }> {
   const fromFile = await readOptional(config.formPath);
@@ -86,18 +145,35 @@ export async function warmUp(): Promise<void> {
   const blank = await PDFDocument.create();
   blank.addPage().drawText('warm up');
   await extractSource(pdfjs, await blank.save(), nodePdfjsOptions);
-  await loadForm(await loadTemplate()).catch(() => {});
+  for (const { template } of await listTemplates().catch(() => [])) await loadForm(template).catch(() => {});
   console.log(`Warmed up in ${Date.now() - t0} ms`);
 }
 
-export async function prepareJob(sourceBytes: Uint8Array): Promise<Prepared> {
-  const template = await loadTemplate();
+/** Read the source PDF once, try every template on it and use the best one (or the one asked for). */
+export async function prepareJob(sourceBytes: Uint8Array, templateId?: string): Promise<Prepared> {
+  const library = await listTemplates();
+  if (!library.length) throw new Error(NO_TEMPLATE);
   const source = await extractSource(pdfjs, sourceBytes, nodePdfjsOptions);
   if (!source.fullText.trim()) {
     throw new Error('No text found in this PDF. Is it a scan? Only text-based PDFs work.');
   }
+  const scored = library.map(({ template }) => {
+    const values = applyMappings(source, template.mappings, {});
+    return { template, values, score: score(template, values) };
+  });
+  scored.sort((a, b) => ratio(b.score) - ratio(a.score) || b.score.found - a.score.found);
+  const pick = scored.find((x) => x.template.id === templateId) ?? scored[0]!;
+  const { fields } = await loadForm(pick.template);
+  return { template: pick.template, source, values: pick.values, fields, ranking: scored.map((x) => x.score) };
+}
+
+/** Same source PDF, another template from the library. */
+export async function switchTemplate(prepared: Prepared, templateId: string): Promise<Prepared> {
+  const hit = (await listTemplates()).find((s) => s.template.id === templateId);
+  if (!hit) throw new Error('That template is no longer in the library.');
+  const template = hit.template;
   const { fields } = await loadForm(template);
-  return { template, source, values: applyMappings(source, template.mappings, {}), fields };
+  return { ...prepared, template, values: applyMappings(prepared.source, template.mappings, {}), fields };
 }
 
 export interface RenderInput {

@@ -94,8 +94,8 @@ Templates live in the browser of each device. Move them with **Templates → Exp
 3. Open `.env` (Notepad) and set `BOT_TOKEN` and `ALLOWED_USER_ID`. Messages from anyone else are ignored
    (no reply at all).
 4. Give the bot a template: in the web app *Templates → Export* (keep *Settings → Export templates with the
-   target form inside* ticked), then send the `.json` file to your bot with the caption **`/template`**.
-   (Or copy it to `bot/data/template.json`.)
+   target form inside* ticked), then send the `.json` file to your bot. Send more templates the same way — they are kept in
+   `bot/data/templates/`.
 5. Double-click **`run-bot.bat`** (or `run-all.bat` for web + bot). Keep the window open; the bot works while
    your PC is on.
 
@@ -106,6 +106,8 @@ Using it:
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 - The PDF comes back with a **picture of the filled page 1** (check it without opening anything) and a **result card**: every field with its value (missing ones marked ❌) and buttons
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
+- **Several templates**: keep as many as you like. For each PDF the bot tries all of them and uses the one
+  that finds the most values (it tells you which, e.g. `9/10 found`). **🔄 Other template** switches with one tap.
 - **Fast**: the bot warms up at start, caches the template/form/font, and fills the top suggestion while you
   are still choosing, so tapping it answers instantly (the card shows ⚡ the time it took).
 - **✏️ Fix a value**: pick a field, type the right value (dropdowns and checkboxes get buttons) and the
@@ -115,7 +117,7 @@ Using it:
 |---|---|
 | `/start`, `/help` | how to use it |
 | `/write <Job Name>` | as the caption of the source PDF, or as a reply to a PDF you sent before → returns `<Job Name>.pdf` |
-| `/template` | shows the active template and its rules; send a `.json` with caption `/template` to replace it |
+| `/templates` | your template library with 🔍 details and 🗑 delete buttons. Send a template `.json` to add it (same template again = update) |
 
 The bot uses the template's *Flatten by default* unless `FLATTEN=true/false` is set. Metadata comes from `.env`
 (`PDF_AUTHOR`, `PDF_CREATOR`, `PDF_PRODUCER`, `TITLE_FROM_JOB_NAME`, `STRIP_XMP`). Telegram limits bot downloads

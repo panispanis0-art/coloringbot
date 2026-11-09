@@ -33,7 +33,10 @@ export const config = {
     .filter(Boolean)
     .map(Number)
     .filter((n) => Number.isFinite(n) && n > 0),
+  /** older single-template setups: still read if it exists */
   templatePath: resolvePath(process.env.TEMPLATE_PATH, 'bot/data/template.json'),
+  /** the template library: every .json in here */
+  templatesDir: resolvePath(process.env.TEMPLATES_DIR, 'bot/data/templates'),
   formPath: process.env.FORM_PATH?.trim() ? resolvePath(process.env.FORM_PATH, '') : undefined,
   fontPath: process.env.FONT_PATH?.trim() ? resolvePath(process.env.FONT_PATH, '') : undefined,
   flatten: bool(process.env.FLATTEN),

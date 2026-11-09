@@ -13,7 +13,7 @@ void warmUp().catch((e) => console.warn('Warm-up skipped:', e.message));
 
 await bot.telegram.setMyCommands([
   { command: 'write', description: 'Fill the form: /write <Job Name> + source PDF' },
-  { command: 'template', description: 'Show the active template' },
+  { command: 'templates', description: 'Your templates' },
   { command: 'help', description: 'How to use the bot' },
   { command: 'start', description: 'Start' },
 ]).catch((e) => console.warn('setMyCommands failed:', e.message));

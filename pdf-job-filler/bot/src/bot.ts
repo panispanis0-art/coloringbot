@@ -1,7 +1,17 @@
 import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
 import { config } from './config.ts';
-import { loadTemplate, prepareJob, renderJob, saveTemplate, suggestJobNames, templateSummary, type Rendered } from './pdf.ts';
+import {
+  deleteTemplate,
+  listTemplates,
+  prepareJob,
+  renderJob,
+  saveTemplate,
+  suggestJobNames,
+  switchTemplate,
+  templateSummary,
+  type Rendered,
+} from './pdf.ts';
 import { renderPreview } from './preview.ts';
 import { addJob, getJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
@@ -13,8 +23,8 @@ export const HELP = [
   '   Shortcut: put the Job Name in the caption of the PDF.',
   '',
   '/write <Job Name> — as caption of a PDF, or as a reply to a PDF.',
-  '/template — show the active template.',
-  '   Send a template .json (exported from the web app) with the caption /template to replace it.',
+  '/templates — your templates (I pick the best one for each PDF).',
+  '   Send a template .json (exported from the web app) to add it.',
   '/help — this message.',
 ].join('\n');
 
@@ -71,14 +81,21 @@ async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
   }
 }
 
+function templateLine(job: Job): string {
+  const sc = job.prepared.ranking.find((r) => r.id === job.prepared.template.id);
+  const auto = job.prepared.ranking.length > 1 ? ' (best match)' : '';
+  return `🧩 Template: ${job.prepared.template.name}${sc ? ` — ${sc.found}/${sc.total} found` : ''}${auto}`;
+}
+
 /** Ask for the Job Name: suggestion buttons + "type it" reply box. */
 async function askName(ctx: Context, job: Job) {
   waitForName(job.userId, job.id);
   fillAhead(job);
   const found = Object.values(job.prepared.values).filter(Boolean).length;
   const buttons = job.suggestions.map((s, i) => [Markup.button.callback(`📝 ${s}`, `jn:${job.id}:${i}`)]);
+  if (job.prepared.ranking.length > 1) buttons.push([Markup.button.callback('🔄 Use another template', `ot:${job.id}`)]);
   await ctx.reply(
-    `📄 ${job.sourceName} — read, ${found} value(s) found.\n\nWhat's the Job Name? Tap one or type your own.`,
+    `📄 ${job.sourceName} — read, ${found} value(s) found.\n${templateLine(job)}\n\nWhat's the Job Name? Tap one or type your own.`,
     buttons.length ? Markup.inlineKeyboard(buttons) : Markup.forceReply().placeholder('Job Name'),
   );
 }
@@ -127,6 +144,7 @@ function resultButtons(job: Job) {
       Markup.button.callback(isFlat(job) ? '📝 Editable copy' : '🔒 Flattened copy', `fl:${job.id}`),
       Markup.button.callback('🔁 Rename', `rn:${job.id}`),
     ],
+    ...(job.prepared.ranking.length > 1 ? [[Markup.button.callback('🔄 Other template', `ot:${job.id}`)]] : []),
   ]);
 }
 
@@ -230,14 +248,34 @@ async function setValue(ctx: Context, job: Job, field: string, value: string) {
   return askName(ctx, job);
 }
 
+async function showLibrary(ctx: Context) {
+  const list = await listTemplates();
+  if (!list.length) return ctx.reply('No templates yet. Export one from the web app (Templates → Export) and send me the .json file.');
+  const lines = list.map(({ template: t }) => {
+    const n = t.mappings.filter((m) => m.rule.type !== 'skip').length;
+    return `• ${t.name} — ${n} fields mapped, updated ${t.updatedAt.slice(0, 10)}`;
+  });
+  const rows = list.map(({ template: t }) => [
+    Markup.button.callback(`🔍 ${t.name}`, `ti:${t.id}`),
+    Markup.button.callback('🗑 Delete', `td:${t.id}`),
+  ]);
+  return ctx.reply(
+    `🧩 ${list.length} template(s). For each PDF I use the one that finds the most values.\n\n${lines.join('\n')}\n\nSend another template .json to add it.`,
+    Markup.inlineKeyboard(rows),
+  );
+}
+
 async function importTemplate(ctx: Context, d: Doc) {
   if (!/\.json$/i.test(d.file_name ?? '') && d.mime_type !== 'application/json') {
     return ctx.reply('Send the template as a .json file (web app: Templates → Export).');
   }
   try {
     const bytes = await download(ctx, d);
-    const t = await saveTemplate(new TextDecoder().decode(bytes));
-    await ctx.reply(`✅ Template saved.\n\n${templateSummary(t)}`);
+    const { template, replaced } = await saveTemplate(new TextDecoder().decode(bytes));
+    const count = (await listTemplates()).length;
+    await ctx.reply(
+      `✅ Template ${replaced ? 'updated' : 'added'}: ${template.name}\n${count} template(s) in the library — I pick the best one for each PDF.\n\n${templateSummary(template)}`,
+    );
   } catch (e) {
     await ctx.reply(`❌ Could not use that template: ${errText(e)}`);
   }
@@ -259,14 +297,51 @@ export function createBot(token = config.token): Telegraf {
   bot.start((ctx) => ctx.reply(`Hi ${ctx.from.first_name ?? ''}! Your user id ${ctx.from.id} is allowed.\n\n${HELP}`));
   bot.help((ctx) => ctx.reply(HELP));
 
-  bot.command('template', async (ctx) => {
+  bot.command(['template', 'templates'], async (ctx) => {
     const reply = (ctx.message as any).reply_to_message;
     if (reply?.document) return importTemplate(ctx, reply.document);
+    return showLibrary(ctx);
+  });
+
+  // template library: details / delete
+  bot.action(/^ti:(\w+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const hit = (await listTemplates()).find((t) => t.template.id === ctx.match[1]);
+    if (!hit) return ctx.reply('That template is no longer in the library.');
+    return ctx.reply(templateSummary(hit.template));
+  });
+  bot.action(/^td:(\w+)$/, async (ctx) => {
+    const gone = await deleteTemplate(ctx.match[1]!);
+    await ctx.answerCbQuery(gone ? `Deleted ${gone.name}` : 'Already gone').catch(() => {});
+    return showLibrary(ctx);
+  });
+
+  // switch template for a job
+  bot.action(/^ot:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
+    if (!job) return;
+    const rows = job.prepared.ranking.map((r, i) => [
+      Markup.button.callback(`${r.id === job.prepared.template.id ? '✅ ' : ''}${r.name} — ${r.found}/${r.total}`, `tp:${job.id}:${i}`),
+    ]);
+    return ctx.reply('Which template? (found / fields it reads from the PDF)', Markup.inlineKeyboard(rows));
+  });
+  bot.action(/^tp:(\w+):(\d+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    const choice = job?.prepared.ranking[Number(ctx.match[2])];
+    await ctx.answerCbQuery(choice ? `Using ${choice.name}` : 'This job expired, send the PDF again.').catch(() => {});
+    if (!job || !choice) return;
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
     try {
-      await ctx.reply(templateSummary(await loadTemplate()));
+      job.prepared = await switchTemplate(job.prepared, choice.id);
     } catch (e) {
-      await ctx.reply(`⚠️ ${errText(e)}`);
+      return ctx.reply(`❌ ${errText(e)}`);
     }
+    job.overrides = {};
+    job.ahead = undefined;
+    job.suggestions = suggestJobNames(job.prepared, job.sourceName);
+    if (job.jobName) return finish(ctx, job, job.jobName);
+    return askName(ctx, job);
   });
 
   // "/write Job" as a reply to a PDF ("/write" alone: I ask for the name)
