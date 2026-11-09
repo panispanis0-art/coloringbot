@@ -17,7 +17,7 @@ import {
 } from './pdf.ts';
 import { renderPreview } from './preview.ts';
 import { allSegments, learnRule } from './teach.ts';
-import { findJob, history, saveJob } from './store.ts';
+import { findDuplicate, findJob, hashOf, history, saveJob } from './store.ts';
 import { habits } from './jobs.ts';
 import { addJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
@@ -74,6 +74,7 @@ async function createJob(ctx: Context, doc: Doc): Promise<Job> {
     chatId: ctx.chat!.id,
     sourceName,
     sourceBytes,
+    sourceHash: hashOf(sourceBytes),
     prepared,
     createdAt: Date.now(),
     overrides: {},
@@ -618,6 +619,37 @@ export function createBot(token = config.token): Telegraf {
     // caption "/write Name" or simply "Name" = the Job Name
     const name = commandArgs(caption, 'write') ?? (caption.startsWith('/') ? '' : caption);
     if (name) return finish(ctx, job, name);
+    // the same PDF again? offer the earlier result instead of a second job
+    const dup = await findDuplicate(job.userId, job.sourceHash!, job.id);
+    if (dup) {
+      const when = new Date(dup.updatedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+      return ctx.reply(
+        `♻️ You already filled this PDF on ${when} as “${dup.jobName}”.`,
+        Markup.inlineKeyboard([
+          [Markup.button.callback('📄 Send that PDF again', `dp:${dup.id}`)],
+          [Markup.button.callback('🆕 Fill it as a new job', `dn:${job.id}`)],
+        ]),
+      );
+    }
+    return nameOrAsk(ctx, job);
+  });
+
+  bot.action(/^dp:(\w+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
+    const old = await findJob(ctx.match[1]!);
+    if (!old?.result) return ctx.reply('That earlier job is gone. Send the PDF again to fill it.');
+    return ctx.replyWithDocument(old.result.fileId, {
+      caption: `♻️ <b>${esc(old.result.fileName)}</b> — the earlier result, sent again.`,
+      parse_mode: 'HTML',
+      ...resultButtons(old),
+    });
+  });
+  bot.action(/^dn:(\w+)$/, async (ctx) => {
+    const job = await findJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'This job is gone, send the PDF again.').catch(() => {});
+    if (!job) return;
+    await ctx.editMessageReplyMarkup(undefined).catch(() => {});
     return nameOrAsk(ctx, job);
   });
 

@@ -116,6 +116,8 @@ Using it:
   with all filled PDFs, a status line per job (✅ complete / 🧩 N missing / ❌ error) and a button per job.
 - **Several templates**: keep as many as you like. For each PDF the bot tries all of them and uses the one
   that finds the most values (it tells you which, e.g. `9/10 found`). **🔄 Other template** switches with one tap.
+- **♻️ Duplicate guard**: send a PDF you already filled and the bot says so, offering the earlier result
+  instantly (no re-fill, no upload) or a fresh job. A caption with a Job Name skips the check.
 - **Nothing expires**: jobs are saved in `bot/data/jobs/` (source PDF + your corrections), so buttons on old
   messages keep working after a restart. The last 200 jobs are kept.
 - **Fast**: the bot warms up at start, caches the template/form/font, and fills the top suggestion while you

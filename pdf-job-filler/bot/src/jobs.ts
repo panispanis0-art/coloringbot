@@ -8,6 +8,8 @@ export interface Job {
   chatId: number;
   sourceName: string;
   sourceBytes: Uint8Array;
+  /** sha256 of the source PDF, to spot the same PDF sent again */
+  sourceHash?: string;
   prepared: Prepared;
   createdAt: number;
   jobName?: string;

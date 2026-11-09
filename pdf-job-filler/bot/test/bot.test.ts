@@ -285,7 +285,7 @@ test('speed: the top suggestion is filled ahead, so tapping it is instant', asyn
   assert.ok(took < 100, `tap answered in ${took.toFixed(0)} ms`);
   // a different name is filled on demand and shows its time
   calls = [];
-  await bot.handleUpdate(pdfMsg(42) as any);
+  await bot.handleUpdate(msg(42, { document: doc('src2.pdf') }) as any);
   await bot.handleUpdate(text(42, 'Other Name') as any);
   assert.match(sent()[0]!.payload.caption, /⚡ \d+ ms/);
 });
@@ -540,6 +540,8 @@ test('autopilot: same kind of name twice -> offer -> PDFs are filled the moment 
   calls = [];
   await bot.handleUpdate(tap(42, buttons(offer)[0]!.callback_data) as any);
   assert.match(lastText(), /Autopilot on/);
+  const forget = () => fs.rm(process.env.JOBS_DIR!, { recursive: true, force: true }); // keep the duplicate guard out of this test
+  await forget();
 
   // a bare PDF is now filled straight away
   calls = [];
@@ -554,10 +556,12 @@ test('autopilot: same kind of name twice -> offer -> PDFs are filled the moment 
   assert.match(lastText(), /autopilot ON — \{ClientName\} - \{OrderNumber\}/);
   await bot.handleUpdate(text(42, '/autoname {OrderNumber} {ClientName} {Nope}') as any);
   assert.match(lastText(), /Your last PDF would be: WO-2026-0152 John Smith/);
+  await forget();
   calls = [];
   await bot.handleUpdate(msg(42, { document: doc('src.pdf') }) as any);
   assert.equal(sent()[0]!.payload.document.filename, 'WO-2026-0147 Maria Popescu.pdf');
   await bot.handleUpdate(text(42, '/autoname off') as any);
+  await forget();
   calls = [];
   await bot.handleUpdate(msg(42, { document: doc('src.pdf') }) as any);
   assert.match(lastText(), /What's the Job Name/);
@@ -570,4 +574,30 @@ test('name patterns tidy up empty fields', async () => {
   assert.equal(applyNamePattern('{B} - {A}', prepared), 'Maria');
   assert.equal(applyNamePattern('{B}', prepared), '');
   assert.equal(applyNamePattern('{file} {A}', prepared, 'scan_01.pdf'), 'scan 01 Maria');
+});
+
+test('duplicate guard: the same PDF again offers the earlier result instantly', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'First Time') as any);
+  calls = [];
+  await bot.handleUpdate(pdfMsg(42) as any);
+  assert.match(lastText(), /You already filled this PDF on .* as “First Time”/);
+  const [again, fresh] = buttons(sent('sendMessage').at(-1));
+  calls = [];
+  await bot.handleUpdate(tap(42, again!.callback_data) as any);
+  const resent = sent()[0]!;
+  assert.match(resent.payload.document, /^FILE_/, 'sent by Telegram file id, no new upload');
+  assert.match(resent.payload.caption, /First Time\.pdf/);
+
+  calls = [];
+  await bot.handleUpdate(tap(42, fresh!.callback_data) as any);
+  assert.match(lastText(), /What's the Job Name/);
+
+  // a different PDF is not a duplicate; a caption skips the check
+  calls = [];
+  await bot.handleUpdate(msg(42, { document: doc('src2.pdf') }) as any);
+  assert.match(lastText(), /What's the Job Name/);
+  calls = [];
+  await bot.handleUpdate(pdfMsg(42, 'Second Copy') as any);
+  assert.equal(sent()[0]!.payload.document.filename, 'Second Copy.pdf');
 });
