@@ -160,3 +160,27 @@ test('/write as a reply to a PDF', async () => {
   await bot.handleUpdate(text(42, '/write') as any);
   assert.match(lastText(), /Send me the source PDF first/);
 });
+
+test('result card: values, missing fields, flatten toggle, rename', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'Card Job') as any);
+  const first = sent()[0]!;
+  assert.equal(first.payload.parse_mode, 'HTML');
+  assert.match(first.payload.caption, /3\/3 fields filled · 📝 editable/);
+  assert.match(first.payload.caption, /ClientName: <b>Maria Popescu<\/b>/);
+  const b = buttons(first);
+  assert.deepEqual(b.map((x) => x.text), ['🔒 Flattened copy', '🔁 Rename']);
+
+  calls = [];
+  await bot.handleUpdate(tap(42, b[0]!.callback_data) as any);
+  const flat = sent()[0]!;
+  assert.match(flat.payload.caption, /🔒 flattened/);
+  assert.equal((await PDFDocument.load(flat.payload.document.source)).getForm().getFields().length, 0);
+  assert.equal(buttons(flat)[0]!.text, '📝 Editable copy');
+
+  calls = [];
+  await bot.handleUpdate(tap(42, b[1]!.callback_data) as any);
+  assert.match(lastText(), /New Job Name/);
+  await bot.handleUpdate(text(42, 'Renamed Job') as any);
+  assert.equal(sent()[0]?.payload.document.filename, 'Renamed Job.pdf');
+});

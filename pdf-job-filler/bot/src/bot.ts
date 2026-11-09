@@ -81,18 +81,52 @@ async function askName(ctx: Context, job: Job) {
   );
 }
 
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function isFlat(job: Job): boolean {
+  return job.flatten ?? config.flatten ?? job.prepared.template.options.flatten;
+}
+
+/** The message under the PDF: every mapped field with its value, missing ones marked. */
+export function resultCaption(job: Job, fileName: string, values: Record<string, string>, warnings: string[]): string {
+  const mapped = job.prepared.template.mappings.filter((m) => m.rule.type !== 'skip');
+  const missing = mapped.filter((m) => !values[m.fieldName]);
+  const head = `✅ <b>${esc(fileName)}</b>\n${mapped.length - missing.length}/${mapped.length} fields filled · ${isFlat(job) ? '🔒 flattened' : '📝 editable'}`;
+  const rows = mapped.map((m) => {
+    const v = values[m.fieldName];
+    const short = v && v.length > 60 ? `${v.slice(0, 57)}…` : v;
+    return v ? `• ${esc(m.fieldName)}: <b>${esc(short!.replace(/\n/g, ' / '))}</b>` : `• ${esc(m.fieldName)}: ❌ <i>not found</i>`;
+  });
+  const warn = warnings.filter((w) => !/is not in this form/.test(w)).map((w) => `⚠️ ${esc(w)}`);
+  let out = [head, '', ...rows, ...(warn.length ? ['', ...warn] : [])].join('\n');
+  // Telegram captions are limited to 1024 characters
+  while (out.length > 1000 && rows.length) {
+    rows.pop();
+    out = [head, '', ...rows, '…', ...(warn.length ? ['', ...warn] : [])].join('\n');
+  }
+  return out.slice(0, 1024);
+}
+
+function resultButtons(job: Job) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback(isFlat(job) ? '📝 Editable copy' : '🔒 Flattened copy', `fl:${job.id}`),
+      Markup.button.callback('🔁 Rename', `rn:${job.id}`),
+    ],
+  ]);
+}
+
 async function finish(ctx: Context, job: Job, jobName: string) {
   waitForName(job.userId, undefined);
   job.jobName = jobName.trim();
   await ctx.sendChatAction('upload_document').catch(() => {});
   try {
-    const res = await renderJob({ prepared: job.prepared, jobName: job.jobName, overrides: job.overrides, flatten: job.flatten });
-    const filled = Object.keys(res.values).length;
-    let caption = `✅ ${res.fileName} — ${filled} field(s) filled.`;
-    if (res.warnings.length) caption += `\n⚠️ ${res.warnings.slice(0, 5).join('\n⚠️ ')}`;
-    if (res.warnings.length > 5) caption += `\n…and ${res.warnings.length - 5} more`;
-    await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, { caption: caption.slice(0, 1000) });
-    console.log(`Filled "${res.fileName}" (${filled} fields, ${res.warnings.length} warnings)`);
+    const res = await renderJob({ prepared: job.prepared, jobName: job.jobName, overrides: job.overrides, flatten: isFlat(job) });
+    await ctx.replyWithDocument(
+      { source: Buffer.from(res.bytes), filename: res.fileName },
+      { caption: resultCaption(job, res.fileName, res.values, res.warnings), parse_mode: 'HTML', ...resultButtons(job) },
+    );
+    console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${res.warnings.length} warnings)`);
   } catch (e) {
     console.error(e);
     await ctx.reply(`❌ ${errText(e)}`);
@@ -174,6 +208,24 @@ export function createBot(token = config.token): Telegraf {
     if (!job || !name) return;
     await ctx.editMessageReplyMarkup(undefined).catch(() => {});
     return finish(ctx, job, name);
+  });
+
+  // result card: flattened <-> editable copy
+  bot.action(/^fl:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    if (!job?.jobName) return ctx.answerCbQuery('This job expired, send the PDF again.').catch(() => {});
+    job.flatten = !isFlat(job);
+    await ctx.answerCbQuery(job.flatten ? 'Making a flattened copy…' : 'Making an editable copy…').catch(() => {});
+    return finish(ctx, job, job.jobName);
+  });
+
+  // result card: rename -> ask for a new Job Name
+  bot.action(/^rn:(\w+)$/, async (ctx) => {
+    const job = getJob(ctx.match[1]!);
+    if (!job) return ctx.answerCbQuery('This job expired, send the PDF again.').catch(() => {});
+    await ctx.answerCbQuery().catch(() => {});
+    waitForName(job.userId, job.id);
+    return ctx.reply(`New Job Name for ${job.sourceName}?`, Markup.forceReply().placeholder(job.jobName ?? 'Job Name'));
   });
 
   // typed text while a PDF waits for its Job Name

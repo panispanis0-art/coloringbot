@@ -104,6 +104,8 @@ Using it:
 - **Just send the source PDF.** The bot reads it straight away and asks for the Job Name with one-tap
   suggestions taken from the PDF itself (client, order number, file name…). Tap one or type your own.
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
+- The PDF comes back with a **result card**: every field with its value (missing ones marked ❌) and buttons
+  for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
 
 | Command | |
 |---|---|
