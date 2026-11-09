@@ -188,6 +188,10 @@ export function applyRule(
     case "date":
       raw = formatDate(ctx.now ?? new Date(), rule.format || "DD.MM.YYYY");
       break;
+    case "ask":
+      // typed in for each job and passed as an override; otherwise the form keeps its own text
+      raw = undefined;
+      break;
   }
   if (raw === undefined || raw === "") {
     if (rule.defaultValue === undefined || rule.defaultValue === "")
@@ -209,4 +213,11 @@ export function applyMappings(
     if (v !== undefined) values[m.fieldName] = v;
   }
   return values;
+}
+
+const READS_SOURCE = new Set(["label", "regex", "position"]);
+
+/** Does this mapping list read anything from a source PDF? (If not, no source PDF is needed.) */
+export function needsSource(mappings: { rule: MappingRule }[]): boolean {
+  return mappings.some((m) => READS_SOURCE.has(m.rule.type));
 }

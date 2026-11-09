@@ -60,6 +60,8 @@ export function describeRule(m: FieldMapping): string {
       return "Job Name";
     case "date":
       return `today (${r.format || "DD.MM.YYYY"})`;
+    case "ask":
+      return "typed in each time";
   }
 }
 

@@ -1,5 +1,5 @@
 import { extractSource, type PdfJsLike } from "./extract";
-import { applyMappings } from "./mapping";
+import { applyMappings, needsSource } from "./mapping";
 import { fillForm, safeFileName } from "./fill";
 import { base64ToBytes } from "./template";
 import type { FillOptions, SourceDoc, Template } from "./types";
@@ -9,7 +9,8 @@ export interface RunJobInput {
   /** extra pdf.js getDocument options (standardFontDataUrl, cMapUrl...) */
   pdfjsOptions?: Record<string, unknown> | undefined;
   template: Template;
-  sourceBytes: Uint8Array;
+  /** not needed when the template only uses typed-in / fixed / date / Job Name values */
+  sourceBytes?: Uint8Array | undefined;
   jobName: string;
   /** overrides the form stored in the template */
   formBytes?: Uint8Array | undefined;
@@ -23,7 +24,7 @@ export interface RunJobResult {
   bytes: Uint8Array;
   values: Record<string, string>;
   warnings: string[];
-  source: SourceDoc;
+  source?: SourceDoc | undefined;
 }
 
 /** The whole "Run mode" pipeline, shared by the web app and the Telegram bot. */
@@ -36,9 +37,14 @@ export async function runJob(input: RunJobInput): Promise<RunJobResult> {
   if (!formBytes)
     throw new Error("No target form: the template has no form inside and none was given.");
 
-  const source = await extractSource(input.pdfjs, input.sourceBytes, input.pdfjsOptions);
-  if (!source.fullText.trim()) {
-    throw new Error("No text found in the source PDF. Is it a scan? Only text-based PDFs work.");
+  let source: SourceDoc | undefined;
+  if (input.sourceBytes) {
+    source = await extractSource(input.pdfjs, input.sourceBytes, input.pdfjsOptions);
+    if (!source.fullText.trim()) {
+      throw new Error("No text found in the source PDF. Is it a scan? Only text-based PDFs work.");
+    }
+  } else if (needsSource(input.template.mappings)) {
+    throw new Error("This template reads values from a source PDF: choose one.");
   }
   const values = {
     ...applyMappings(source, input.template.mappings, { jobName }),

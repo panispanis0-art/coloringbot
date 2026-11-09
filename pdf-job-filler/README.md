@@ -43,6 +43,16 @@ pdf-job-filler/
 3. **Templates** — make active, edit, delete, **Export** to JSON (backup / other device / the bot), **Import**.
 4. **Settings** — PDF metadata, flatten default, Unicode font.
 
+### PDFs without fill-in boxes (reports, letters…)
+
+If the target PDF is a normal document with no form fields (for example a SmartAligner *Site Alignment Results*
+report), Setup shows **Choose what changes** instead of an error: tap each piece of text you want to change (for
+`Site:5GB0518A` only the value part is covered, the label stays) or drag a box over an empty spot, give each box a
+name, and press **Use these boxes**. The app turns them into real fill-in boxes that match the page (same font size,
+background colour taken from the page, never painting over table lines). They are set to **Type it in each time**:
+on the Run screen you see them pre-filled with today's text and change only what is different — no source PDF
+needed. You can still switch any of them to read from a source PDF.
+
 ### Output PDF
 
 - **Metadata**: Author = `Alex` by default; Creator and Producer are editable (empty = the entry is removed).

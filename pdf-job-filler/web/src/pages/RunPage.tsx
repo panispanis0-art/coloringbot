@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { errorMessage, runJob, type Template } from "@shared";
+import { base64ToBytes, errorMessage, listFormFields, needsSource, runJob, type Template } from "@shared";
 import { pdfjs, pdfjsOptions } from "@/lib/pdfjs";
 import { readFile } from "@/lib/files";
 import { getFont, loadSettings } from "@/lib/store";
@@ -30,6 +30,23 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
 
   useEffect(() => setFlatten(template?.options.flatten ?? false), [template?.id, template?.options.flatten]);
 
+  // fields typed in for each job, pre-filled with what the form says now
+  const askFields = template?.mappings.filter((m) => m.rule.type === "ask").map((m) => m.fieldName) ?? [];
+  const [original, setOriginal] = useState<Record<string, string>>({});
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setOriginal({});
+    setTyped({});
+    if (!template?.targetFormBase64 || !template.mappings.some((m) => m.rule.type === "ask")) return;
+    listFormFields(base64ToBytes(template.targetFormBase64))
+      .then((fields) => {
+        const now = Object.fromEntries(fields.map((f) => [f.name, f.currentValue ?? ""]));
+        setOriginal(now);
+        setTyped(now);
+      })
+      .catch(() => {});
+  }, [template?.id, template?.updatedAt]);
+
   if (!templates.length || !template) {
     return (
       <div className="page">
@@ -46,8 +63,12 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
     );
   }
 
+  const needs = template ? needsSource(template.mappings) : true;
+
   async function run(overrides = edits) {
-    if (!source || !template) return;
+    if (!template || (needs && !source)) return;
+    // only what was actually changed: untouched boxes keep the PDF's own text
+    const changed = Object.fromEntries(askFields.filter((f) => typed[f] !== original[f]).map((f) => [f, typed[f] ?? ""]));
     setBusy(true);
     setError(undefined);
     try {
@@ -57,9 +78,9 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
         pdfjs,
         pdfjsOptions,
         template,
-        sourceBytes: source.bytes,
+        sourceBytes: source?.bytes,
         jobName,
-        overrides,
+        overrides: { ...changed, ...overrides },
         fill: {
           flatten,
           stripXmp: s.stripXmp,
@@ -83,8 +104,8 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
     }
   }
 
-  const ready = !!source && !!jobName.trim();
-  const mapped = template.mappings.filter((m) => m.rule.type !== "skip");
+  const ready = (!needs || !!source) && !!jobName.trim();
+  const mapped = template.mappings.filter((m) => m.rule.type !== "skip" && m.rule.type !== "ask");
 
   return (
     <div className="page run">
@@ -100,16 +121,18 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
             ))}
           </select>
         </label>
-        <FilePicker
-          label="Source PDF"
-          fileName={source?.name}
-          onFile={async (f) => {
-            setSource({ name: f.name, bytes: await readFile(f) });
-            setResult(undefined);
-            setValues(undefined);
-            setEdits({});
-          }}
-        />
+        {needs && (
+          <FilePicker
+            label="Source PDF"
+            fileName={source?.name}
+            onFile={async (f) => {
+              setSource({ name: f.name, bytes: await readFile(f) });
+              setResult(undefined);
+              setValues(undefined);
+              setEdits({});
+            }}
+          />
+        )}
         <label className="row">
           <span>Job Name</span>
           <input
@@ -119,6 +142,21 @@ export function RunPage({ templates, activeId, onActive, goSetup }: Props) {
             onKeyDown={(e) => e.key === "Enter" && ready && run()}
           />
         </label>
+        {askFields.length > 0 && (
+          <div className="values-ask">
+            <h3>What changes this time</h3>
+            <p className="muted small">Change only what is different; the rest stays as it is in the PDF.</p>
+            {askFields.map((f) => (
+              <label className="row" key={f}>
+                <span>
+                  {f}
+                  {typed[f] !== original[f] && <span className="tag green"> changed</span>}
+                </span>
+                <input value={typed[f] ?? ""} onChange={(e) => setTyped({ ...typed, [f]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+        )}
         <label className="check">
           <input type="checkbox" checked={flatten} onChange={(e) => setFlatten(e.target.checked)} />
           Flatten (fields become plain text, not editable)

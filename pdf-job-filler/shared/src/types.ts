@@ -129,12 +129,24 @@ export interface DateRule extends RuleBase {
   format?: string | undefined;
 }
 
+/** Typed in by hand for each job (web: Run screen; bot: asked in the chat). */
+export interface AskRule extends RuleBase {
+  type: "ask";
+}
+
 export interface SkipRule {
   type: "skip";
 }
 
 export type MappingRule =
-  LabelRule | RegexRule | PositionRule | StaticRule | JobNameRule | DateRule | SkipRule;
+  | LabelRule
+  | RegexRule
+  | PositionRule
+  | StaticRule
+  | JobNameRule
+  | DateRule
+  | AskRule
+  | SkipRule;
 
 export interface FieldMapping {
   fieldName: string;

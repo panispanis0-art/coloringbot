@@ -141,3 +141,34 @@ test('a Unicode font keeps ș/ț, also when flattened', { skip: !(await fs.stat(
     if (flatten) assert.match(doc.fullText, /Brașov, Țara Bârsei/);
   }
 });
+
+test('flat PDF: spots become boxes that keep the old text until a new value is given', async () => {
+  const { addFieldsToPdf, textWidth } = await import('../src/index.ts');
+  const plain = await PDFDocument.create();
+  const page = plain.addPage([400, 200]);
+  const font = await plain.embedFont((await import('pdf-lib')).StandardFonts.Helvetica);
+  page.drawText('Sector:Gamma', { x: 50, y: 100, size: 12, font });
+  page.drawText('Position:1', { x: 50, y: 80, size: 12, font });
+  const bytes = await plain.save();
+  assert.equal((await listFormFields(bytes)).length, 0);
+
+  const off = await textWidth('Sector:', 12);
+  const fillable = await addFieldsToPdf(bytes, [
+    { name: 'Sector', page: 1, x: 50 + off - 1, y: 96.6, w: 60, h: 15.3, fontSize: 12, text: 'Gamma' },
+    { name: 'Position', page: 1, x: 50 + (await textWidth('Position:', 12)) - 1, y: 76.6, w: 30, h: 15.3, fontSize: 12, text: '1' },
+  ]);
+  const fields = await listFormFields(fillable);
+  assert.deepEqual(fields.map((f) => [f.name, f.currentValue]), [['Sector', 'Gamma'], ['Position', '1']]);
+
+  // template with "typed in each time" rules needs no source PDF; only changed values are written
+  const t = parseTemplate(JSON.stringify({ ...emptyTemplate('Flat', fields), targetFormBase64: bytesToBase64(fillable) }));
+  t.mappings = t.mappings.map((m) => ({ ...m, rule: { type: 'ask' as const } }));
+  const res = await runJob({ pdfjs, template: t, jobName: 'Alpha 2', overrides: { Sector: 'Alpha' }, fill: { flatten: true } });
+  const text = (await extractSource(pdfjs, res.bytes, opts)).fullText;
+  assert.match(text, /Alpha/);
+  assert.match(text, /1/);
+  await assert.rejects(
+    runJob({ pdfjs, template: { ...t, mappings: [{ fieldName: 'Sector', fieldType: 'text', rule: { type: 'label', label: 'X' } }] }, jobName: 'x' }),
+    /reads values from a source PDF/,
+  );
+});

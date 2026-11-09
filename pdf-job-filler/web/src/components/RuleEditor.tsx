@@ -11,6 +11,7 @@ const TYPES: { value: MappingRule["type"]; label: string }[] = [
   { value: "label", label: "Text next to a label" },
   { value: "regex", label: "Regular expression" },
   { value: "position", label: "Area on the page" },
+  { value: "ask", label: "Type it in each time" },
   { value: "jobName", label: "Job Name" },
   { value: "static", label: "Fixed value" },
   { value: "date", label: "Today's date" },
@@ -41,6 +42,8 @@ export function defaultRule(type: MappingRule["type"], prev?: MappingRule): Mapp
       return { ...common, type: "static", value: "" };
     case "date":
       return { ...common, type: "date", format: "DD.MM.YYYY" };
+    case "ask":
+      return { ...common, type: "ask" };
   }
 }
 

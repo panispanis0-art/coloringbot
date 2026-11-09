@@ -26,6 +26,7 @@ import { FilePicker } from "@/components/FilePicker";
 import { PdfPage, PageNav, type Box } from "@/components/PdfPage";
 import { RuleEditor } from "@/components/RuleEditor";
 import { ResultView } from "@/components/ResultView";
+import { SpotPicker } from "@/components/SpotPicker";
 
 interface Props {
   editing?: Template | undefined;
@@ -55,6 +56,7 @@ export function SetupPage({ editing, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [flat, setFlat] = useState<{ bytes: Uint8Array; name: string }>();
   const [test, setTest] = useState<{ bytes: Uint8Array; fileName: string; warnings: string[] }>();
 
   // open an existing template for editing
@@ -84,23 +86,31 @@ export function SetupPage({ editing, onSaved }: Props) {
     try {
       const bytes = await readFile(file);
       const f = await listFormFields(bytes);
-      if (!f.length) throw new Error("This PDF has no fillable form fields (AcroForm).");
-      setFormBytes(bytes);
-      setFormName(file.name);
-      setFields(f);
-      setTemplate((prev) => {
-        const fresh = emptyTemplate(prev?.name || file.name.replace(/\.pdf$/i, ""), f);
-        if (!prev) return fresh;
-        // keep rules of fields that still exist
-        const old = new Map(prev.mappings.map((m) => [m.fieldName, m]));
-        return { ...prev, mappings: fresh.mappings.map((m) => old.get(m.fieldName) ?? m) };
-      });
-      setSelected(f[0]?.name);
+      // no fill-in boxes: let the user pick the spots that change
+      if (!f.length) return setFlat({ bytes, name: file.name });
+      await applyForm(bytes, file.name);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Use a fillable PDF as the target form. Fields in askFields are typed in for each job. */
+  async function applyForm(bytes: Uint8Array, name: string, askFields: string[] = []) {
+    const f = await listFormFields(bytes);
+    setFormBytes(bytes);
+    setFormName(name);
+    setFields(f);
+    setTemplate((prev) => {
+      const fresh = emptyTemplate(prev?.name || name.replace(/\.pdf$/i, ""), f);
+      fresh.mappings = fresh.mappings.map((m) => (askFields.includes(m.fieldName) ? { ...m, rule: { type: "ask" } } : m));
+      if (!prev || askFields.length) return fresh;
+      // keep rules of fields that still exist
+      const old = new Map(prev.mappings.map((m) => [m.fieldName, m]));
+      return { ...prev, mappings: fresh.mappings.map((m) => old.get(m.fieldName) ?? m) };
+    });
+    setSelected(f[0]?.name);
   }
 
   async function onSource(file: File) {
@@ -318,7 +328,23 @@ export function SetupPage({ editing, onSaved }: Props) {
         )}
       </section>
 
-      {template && (
+      {flat && (
+        <SpotPicker
+          bytes={flat.bytes}
+          fileName={flat.name}
+          onCancel={() => setFlat(undefined)}
+          onDone={async (fillable, names) => {
+            const base = flat.name.replace(/\.pdf$/i, "");
+            setFlat(undefined);
+            await applyForm(fillable, `${base}.pdf`, names);
+            setNotice(
+              `Made ${names.length} fill-in box(es). They are set to “Type it in each time” — change any of them to read from a source PDF if you like, then Save.`,
+            );
+          }}
+        />
+      )}
+
+      {template && !flat && (
         <div className="setup-grid">
           <section className="card fields">
             <div className="fields-head">
@@ -493,7 +519,7 @@ export function SetupPage({ editing, onSaved }: Props) {
         </div>
       )}
 
-      {template && (
+      {template && !flat && (
         <section className="card save-bar">
           <label className="row grow">
             <span>Template name</span>

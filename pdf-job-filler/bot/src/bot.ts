@@ -281,7 +281,8 @@ async function askFieldValue(ctx: Context, job: Job, index: number) {
   const now = currentValue(job, m.fieldName);
   const walking = !!job.walk?.length;
   const step = walking ? `🧩 ${job.walkTotal! - job.walk!.length + 1}/${job.walkTotal} · ` : '';
-  const title = `${step}${m.fieldName} — ${now ? `Now: ${now}` : walking ? 'not found in the PDF' : 'Now: empty'}`;
+  const empty = m.rule.type === 'ask' ? 'type it in' : walking ? 'not found in the PDF' : 'Now: empty';
+  const title = `${step}${m.fieldName} — ${now ? `Now: ${now}` : empty}`;
   const walkRow = walking
     ? [[Markup.button.callback('⏭ Skip', `sk:${job.id}`), Markup.button.callback('✋ Done for now', `st:${job.id}`)]]
     : [];
