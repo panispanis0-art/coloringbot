@@ -108,6 +108,8 @@ Using it:
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
 - **Several templates**: keep as many as you like. For each PDF the bot tries all of them and uses the one
   that finds the most values (it tells you which, e.g. `9/10 found`). **🔄 Other template** switches with one tap.
+- **Nothing expires**: jobs are saved in `bot/data/jobs/` (source PDF + your corrections), so buttons on old
+  messages keep working after a restart. The last 200 jobs are kept.
 - **Fast**: the bot warms up at start, caches the template/form/font, and fills the top suggestion while you
   are still choosing, so tapping it answers instantly (the card shows ⚡ the time it took).
 - **🧩 Fill N missing**: when fields were not found, the bot asks for them one after another (type, tap an
@@ -119,6 +121,7 @@ Using it:
 |---|---|
 | `/start`, `/help` | how to use it |
 | `/write <Job Name>` | as the caption of the source PDF, or as a reply to a PDF you sent before → returns `<Job Name>.pdf` |
+| `/history` | your last 10 jobs; tap one to get its PDF again (then rename / fix / flatten as usual) |
 | `/templates` | your template library with 🔍 details and 🗑 delete buttons. Send a template `.json` to add it (same template again = update) |
 
 The bot uses the template's *Flatten by default* unless `FLATTEN=true/false` is set. Metadata comes from `.env`

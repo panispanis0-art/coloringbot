@@ -12,6 +12,7 @@ const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'pjf-bot-'));
 process.env.ALLOWED_USER_ID = '42';
 process.env.TEMPLATE_PATH = path.join(tmp, 'template.json');
 process.env.TEMPLATES_DIR = path.join(tmp, 'templates');
+process.env.JOBS_DIR = path.join(tmp, 'jobs');
 process.env.BOT_TOKEN = '123:TEST';
 process.env.PREVIEW = 'false'; // most tests look at the PDF message; the preview test turns it on
 
@@ -87,6 +88,7 @@ beforeEach(async () => {
   calls = [];
   clearJobs();
   await fs.rm(process.env.TEMPLATES_DIR!, { recursive: true, force: true });
+  await fs.rm(process.env.JOBS_DIR!, { recursive: true, force: true });
   await fs.writeFile(process.env.TEMPLATE_PATH!, files['tpl.json']!);
 });
 
@@ -365,4 +367,39 @@ test('fill the gaps: walk through missing fields, skip one, get one complete PDF
   assert.deepEqual(form.getDropdown('Priority').getSelected(), ['High']);
   // skipped field is not counted as missing any more
   assert.ok(!buttons(sent()[0]).some((b) => b.text.startsWith('🧩')));
+});
+
+test('jobs survive a restart: old buttons still work, /history brings PDFs back', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(pdfMsg(42, 'Before Restart') as any);
+  const fix = buttons(sent()[0]).find((b) => b.text.startsWith('✏️'))!;
+  const jobId = fix.callback_data.split(':')[1]!;
+  // correct a value, then "restart": memory is wiped
+  await bot.handleUpdate(tap(42, fix.callback_data) as any);
+  const client = buttons(sent('sendMessage').at(-1)).find((b) => b.text.startsWith('ClientName'))!;
+  await bot.handleUpdate(tap(42, client.callback_data) as any);
+  await bot.handleUpdate(text(42, 'Corrected Client') as any);
+  clearJobs();
+
+  const restarted = makeBot();
+  calls = [];
+  await restarted.handleUpdate(tap(42, `rn:${jobId}`) as any);
+  assert.match(lastText(), /New Job Name/);
+  await restarted.handleUpdate(text(42, 'After Restart') as any);
+  const form = await filledForm(sent()[0]!);
+  assert.equal(form.getTextField('ClientName').getText(), 'Corrected Client', 'corrections survive');
+  assert.equal(sent()[0]!.payload.document.filename, 'After Restart.pdf');
+
+  // newest first; jobs still waiting for a name show ⏳
+  await restarted.handleUpdate(pdfMsg(42) as any);
+  calls = [];
+  await restarted.handleUpdate(text(42, '/history') as any);
+  const rows = buttons(sent('sendMessage').at(-1));
+  assert.equal(rows.length, 2);
+  assert.match(rows[0]!.text, /^⏳ src\.pdf/);
+  assert.match(rows[1]!.text, /^📄 After Restart/);
+  clearJobs();
+  calls = [];
+  await restarted.handleUpdate(tap(42, rows[1]!.callback_data) as any);
+  assert.equal(sent()[0]!.payload.document.filename, 'After Restart.pdf');
 });

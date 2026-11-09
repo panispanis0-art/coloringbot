@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import type { Prepared } from './pdf.ts';
 
 /** A source PDF the user sent, ready to be filled (possibly several times). */
@@ -33,7 +34,7 @@ const awaiting = new Map<number, Awaiting>();
 
 export function newJobId(): string {
   let id: string;
-  do id = Math.random().toString(36).slice(2, 8);
+  do id = randomBytes(4).readUInt32BE().toString(36).padStart(7, '0');
   while (jobs.has(id));
   return id;
 }

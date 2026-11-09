@@ -13,7 +13,8 @@ import {
   type Rendered,
 } from './pdf.ts';
 import { renderPreview } from './preview.ts';
-import { addJob, getJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
+import { findJob, history, saveJob } from './store.ts';
+import { addJob, jobAwaitingName, newJobId, pendingInput, waitForName, waitForValue, type Job } from './jobs.ts';
 
 export const HELP = [
   'PDF Job Filler bot',
@@ -25,6 +26,7 @@ export const HELP = [
   '/write <Job Name> — as caption of a PDF, or as a reply to a PDF.',
   '/templates — your templates (I pick the best one for each PDF).',
   '   Send a template .json (exported from the web app) to add it.',
+  '/history — your last jobs, tap one to get its PDF again.',
   '/help — this message.',
 ].join('\n');
 
@@ -63,7 +65,7 @@ async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
     const sourceBytes = await download(ctx, doc);
     const prepared = await prepareJob(sourceBytes);
     const sourceName = doc.file_name ?? 'source.pdf';
-    return addJob({
+    const job = addJob({
       id: newJobId(),
       userId: ctx.from!.id,
       chatId: ctx.chat!.id,
@@ -74,6 +76,8 @@ async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
       overrides: {},
       suggestions: suggestJobNames(prepared, sourceName),
     });
+    await saveJob(job).catch((e) => console.warn('Could not save job:', e));
+    return job;
   } catch (e) {
     console.error(e);
     await ctx.reply(`❌ ${errText(e)}`);
@@ -204,6 +208,7 @@ async function finish(ctx: Context, job: Job, jobName: string) {
     } else {
       await ctx.replyWithDocument({ source: Buffer.from(res.bytes), filename: res.fileName }, card);
     }
+    await saveJob(job).catch((e) => console.warn('Could not save job:', e));
     console.log(`Filled "${res.fileName}" (${Object.keys(res.values).length} fields, ${Math.round(ms)} ms${ahead ? ', filled ahead' : ''})`);
   } catch (e) {
     console.error(e);
@@ -334,6 +339,23 @@ export function createBot(token = config.token): Telegraf {
     return showLibrary(ctx);
   });
 
+  bot.command('history', async (ctx) => {
+    const list = await history(ctx.from.id, 10);
+    if (!list.length) return ctx.reply('No jobs yet. Send me a source PDF to start.');
+    const day = (t: number) => new Date(t).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const rows = list.map((h) => [
+      Markup.button.callback(`${h.jobName ? '📄' : '⏳'} ${h.jobName ?? h.sourceName} · ${day(h.updatedAt)}`.slice(0, 60), `hj:${h.id}`),
+    ]);
+    return ctx.reply('🕘 Your last jobs — tap one to get its PDF again (then rename, fix or flatten as usual).', Markup.inlineKeyboard(rows));
+  });
+  bot.action(/^hj:(\w+)$/, async (ctx) => {
+    const job = await findJob(ctx.match[1]!);
+    await ctx.answerCbQuery(job ? undefined : 'That job is gone.').catch(() => {});
+    if (!job) return;
+    if (job.jobName) return finish(ctx, job, job.jobName);
+    return askName(ctx, job);
+  });
+
   // template library: details / delete
   bot.action(/^ti:(\w+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
@@ -349,7 +371,7 @@ export function createBot(token = config.token): Telegraf {
 
   // switch template for a job
   bot.action(/^ot:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (!job) return;
     const rows = job.prepared.ranking.map((r, i) => [
@@ -358,7 +380,7 @@ export function createBot(token = config.token): Telegraf {
     return ctx.reply('Which template? (found / fields it reads from the PDF)', Markup.inlineKeyboard(rows));
   });
   bot.action(/^tp:(\w+):(\d+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     const choice = job?.prepared.ranking[Number(ctx.match[2])];
     await ctx.answerCbQuery(choice ? `Using ${choice.name}` : 'This job expired, send the PDF again.').catch(() => {});
     if (!job || !choice) return;
@@ -405,7 +427,7 @@ export function createBot(token = config.token): Telegraf {
 
   // tap on a suggested name
   bot.action(/^jn:(\w+):(\d+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     const name = job?.suggestions[Number(ctx.match[2])];
     await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (!job || !name) return;
@@ -415,7 +437,7 @@ export function createBot(token = config.token): Telegraf {
 
   // result card: flattened <-> editable copy
   bot.action(/^fl:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     if (!job?.jobName) return ctx.answerCbQuery('This job expired, send the PDF again.').catch(() => {});
     job.flatten = !isFlat(job);
     await ctx.answerCbQuery(job.flatten ? 'Making a flattened copy…' : 'Making an editable copy…').catch(() => {});
@@ -424,7 +446,7 @@ export function createBot(token = config.token): Telegraf {
 
   // result card: rename -> ask for a new Job Name
   bot.action(/^rn:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     if (!job) return ctx.answerCbQuery('This job expired, send the PDF again.').catch(() => {});
     await ctx.answerCbQuery().catch(() => {});
     waitForName(job.userId, job.id);
@@ -433,7 +455,7 @@ export function createBot(token = config.token): Telegraf {
 
   // result card: fill the missing fields one after another
   bot.action(/^mf:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (!job) return;
     job.walk = missingFields(job);
@@ -441,7 +463,7 @@ export function createBot(token = config.token): Telegraf {
     return nextMissing(ctx, job);
   });
   bot.action(/^sk:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery().catch(() => {});
     const field = job?.walk?.shift();
     if (!job || !field) return;
@@ -450,7 +472,7 @@ export function createBot(token = config.token): Telegraf {
     return nextMissing(ctx, job);
   });
   bot.action(/^st:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery().catch(() => {});
     if (!job?.walk) return;
     job.walk = [];
@@ -460,18 +482,18 @@ export function createBot(token = config.token): Telegraf {
 
   // result card: fix a value
   bot.action(/^fx:(\w+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (job) return showFieldPicker(ctx, job);
   });
   bot.action(/^fe:(\w+):(\d+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     await ctx.answerCbQuery(job ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (job) return askFieldValue(ctx, job, Number(ctx.match[2]));
   });
   // option / checkbox chosen
   bot.action(/^fo:(\w+):(\d+):(\d+)$/, async (ctx) => {
-    const job = getJob(ctx.match[1]!);
+    const job = await findJob(ctx.match[1]!);
     const m = job && editableFields(job)[Number(ctx.match[2])];
     await ctx.answerCbQuery(m ? undefined : 'This job expired, send the PDF again.').catch(() => {});
     if (!job || !m) return;

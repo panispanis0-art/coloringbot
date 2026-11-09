@@ -37,6 +37,8 @@ export const config = {
   templatePath: resolvePath(process.env.TEMPLATE_PATH, 'bot/data/template.json'),
   /** the template library: every .json in here */
   templatesDir: resolvePath(process.env.TEMPLATES_DIR, 'bot/data/templates'),
+  /** saved jobs (source PDF + choices), for /history and buttons after a restart */
+  jobsDir: resolvePath(process.env.JOBS_DIR, 'bot/data/jobs'),
   formPath: process.env.FORM_PATH?.trim() ? resolvePath(process.env.FORM_PATH, '') : undefined,
   fontPath: process.env.FONT_PATH?.trim() ? resolvePath(process.env.FONT_PATH, '') : undefined,
   flatten: bool(process.env.FLATTEN),

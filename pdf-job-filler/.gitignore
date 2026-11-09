@@ -8,4 +8,5 @@ bot/.env
 # your real template contains your form: keep it out of git
 bot/data/*.json
 bot/data/templates/
+bot/data/jobs/
 *.log
