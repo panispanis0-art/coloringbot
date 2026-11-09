@@ -24,6 +24,8 @@ interface Props {
   onSelectRect?: (r: { x: number; y: number; w: number; h: number }) => void | undefined;
   onPageCount?: (n: number) => void | undefined;
   maxWidth?: number | undefined;
+  /** 1 = fit the screen; 2 = twice as big (scroll sideways) */
+  zoom?: number | undefined;
 }
 
 /** Renders one PDF page to a canvas with clickable overlay boxes and drag-to-select. */
@@ -34,6 +36,7 @@ export function PdfPage({
   onSelectRect,
   onPageCount,
   maxWidth = 900,
+  zoom = 1,
 }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -69,10 +72,10 @@ export function PdfPage({
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(Math.min(el.clientWidth, maxWidth)));
+    const ro = new ResizeObserver(() => setWidth(Math.min(el.clientWidth, maxWidth) * zoom));
     ro.observe(el);
     return () => ro.disconnect();
-  }, [maxWidth]);
+  }, [maxWidth, zoom]);
 
   useEffect(() => {
     if (!doc || !width || !canvas.current) return;

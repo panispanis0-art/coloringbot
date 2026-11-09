@@ -20,6 +20,8 @@ export function SpotPicker({ bytes, fileName, onDone, onCancel }: Props) {
   const [spots, setSpots] = useState<(Spot & { key: string })[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [zoom, setZoom] = useState(1);
+  const [drawing, setDrawing] = useState(false);
 
   useEffect(() => {
     extractSource(pdfjs, bytes, pdfjsOptions)
@@ -85,20 +87,36 @@ export function SpotPicker({ bytes, fileName, onDone, onCancel }: Props) {
     <section className="card">
       <h3>Choose what changes in “{fileName}”</h3>
       <p className="muted">
-        This PDF has no fill-in boxes, so let's make them. <b>Tap each piece of text you want to change</b> (tap again to
-        undo) or <b>drag a box</b> over an empty spot. Everything else stays exactly as it is.
+        This PDF has no fill-in boxes, so let's make them. <b>Tap each piece of text you want to change</b> (tap again to undo). For an empty spot, tap <b>✏️ Draw a box</b> and drag. On a phone, use <b>Zoom</b>. Everything else stays exactly as it is.
       </p>
+      <div className="picker-tools">
+        <span className="muted small">Zoom</span>
+        {[1, 2, 3].map((z) => (
+          <button key={z} className={`btn small ${zoom === z ? "primary" : ""}`} onClick={() => setZoom(z)}>
+            {z}×
+          </button>
+        ))}
+        <button className={`btn small ${drawing ? "primary" : ""}`} onClick={() => setDrawing(!drawing)}>
+          {drawing ? "✏️ Drawing: drag on the page" : "✏️ Draw a box"}
+        </button>
+      </div>
       <PageNav page={page} count={count} onChange={setPage} />
       <PdfPage
         bytes={bytes}
         page={page}
         boxes={boxes}
+        zoom={zoom}
         onPageCount={setCount}
-        onSelectRect={(r) => {
-          if (!raster) return;
-          const spot = spotFromArea(raster, page, r, spots.length + 1);
-          setSpots((prev) => [...prev, { ...spot, key: `a${Date.now()}` }]);
-        }}
+        {...(drawing
+          ? {
+              onSelectRect: (r: { x: number; y: number; w: number; h: number }) => {
+                if (!raster) return;
+                const spot = spotFromArea(raster, page, r, spots.length + 1);
+                setSpots((prev) => [...prev, { ...spot, key: `a${Date.now()}` }]);
+                setDrawing(false);
+              },
+            }
+          : {})}
       />
       {spots.length > 0 && (
         <>
