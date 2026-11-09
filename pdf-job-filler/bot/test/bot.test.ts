@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { Telegram } from 'telegraf';
+import { unzipSync } from 'fflate';
 
 const samples = path.resolve(import.meta.dirname, '../../samples');
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'pjf-bot-'));
@@ -13,6 +14,7 @@ process.env.ALLOWED_USER_ID = '42';
 process.env.TEMPLATE_PATH = path.join(tmp, 'template.json');
 process.env.TEMPLATES_DIR = path.join(tmp, 'templates');
 process.env.JOBS_DIR = path.join(tmp, 'jobs');
+process.env.BATCH_WAIT_MS = '40';
 process.env.BOT_TOKEN = '123:TEST';
 process.env.PREVIEW = 'false'; // most tests look at the PDF message; the preview test turns it on
 
@@ -82,6 +84,7 @@ before(async () => {
   t.mappings = t.mappings.map((m) => (rules[m.fieldName] ? { ...m, rule: rules[m.fieldName] } : m));
   files['tpl.json'] = new TextEncoder().encode(JSON.stringify(t));
   files['src.pdf'] = new Uint8Array(await fs.readFile(path.join(samples, 'source-example.pdf')));
+  files['src2.pdf'] = new Uint8Array(await fs.readFile(path.join(samples, 'source-example-2.pdf')));
 });
 
 beforeEach(async () => {
@@ -402,4 +405,34 @@ test('jobs survive a restart: old buttons still work, /history brings PDFs back'
   calls = [];
   await restarted.handleUpdate(tap(42, rows[1]!.callback_data) as any);
   assert.equal(sent()[0]!.payload.document.filename, 'After Restart.pdf');
+});
+
+test('batch: an album of PDFs comes back as one ZIP with a status per job', async () => {
+  const bot = makeBot();
+  const album = (name: string) => msg(42, { document: doc(name), media_group_id: 'g1' });
+  for (const f of ['src.pdf', 'src2.pdf', 'src.pdf', 'missing.pdf']) await bot.handleUpdate(album(f) as any);
+  assert.equal(sent().length, 0, 'waits for the whole album');
+  await new Promise((r) => setTimeout(r, 400));
+  const zip = sent()[0]!;
+  assert.match(zip.payload.document.filename, /^Jobs .* \(3\)\.zip$/);
+  const names = Object.keys(unzipSync(new Uint8Array(zip.payload.document.source))).sort();
+  assert.deepEqual(names, ['John Smith - WO-2026-0152.pdf', 'Maria Popescu - WO-2026-0147 (2).pdf', 'Maria Popescu - WO-2026-0147.pdf']);
+  const inside = unzipSync(new Uint8Array(zip.payload.document.source));
+  const form = (await PDFDocument.load(inside['John Smith - WO-2026-0152.pdf']!)).getForm();
+  assert.equal(form.getTextField('ClientName').getText(), 'John Smith');
+  assert.match(zip.payload.caption, /3 of 4 filled/);
+  assert.match(zip.payload.caption, /❌ missing\.pdf/);
+  const jobsButtons = buttons(zip);
+  assert.equal(jobsButtons.length, 3);
+  // a job button opens that job's result card
+  calls = [];
+  await bot.handleUpdate(tap(42, jobsButtons[1]!.callback_data) as any);
+  assert.equal(sent()[0]!.payload.document.filename, 'John Smith - WO-2026-0152.pdf');
+});
+
+test('batch of one behaves like a single PDF', async () => {
+  const bot = makeBot();
+  await bot.handleUpdate(msg(42, { document: doc('src.pdf'), media_group_id: 'g2', caption: 'Solo' }) as any);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(sent()[0]!.payload.document.filename, 'Solo.pdf');
 });

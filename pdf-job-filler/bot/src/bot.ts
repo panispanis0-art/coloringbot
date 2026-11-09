@@ -1,5 +1,6 @@
 import { Markup, Telegraf, type Context } from 'telegraf';
 import { message } from 'telegraf/filters';
+import { zipSync } from 'fflate';
 import { config } from './config.ts';
 import {
   deleteTemplate,
@@ -22,6 +23,7 @@ export const HELP = [
   '📄 Just send me the source PDF. I read it and ask for the Job Name —',
   '   tap a suggestion or type one. You get back "<Job Name>.pdf".',
   '   Shortcut: put the Job Name in the caption of the PDF.',
+  '📦 Several PDFs at once: select them all and send together — you get one ZIP.',
   '',
   '/write <Job Name> — as caption of a PDF, or as a reply to a PDF.',
   '/templates — your templates (I pick the best one for each PDF).',
@@ -55,29 +57,32 @@ async function download(ctx: Context, d: Doc): Promise<Uint8Array> {
 }
 
 /** Download + read a source PDF into a Job. Replies with the error and returns undefined on failure. */
+/** Download + read a source PDF into a Job (throws on failure). */
+async function createJob(ctx: Context, doc: Doc): Promise<Job> {
+  if (!isPdf(doc)) throw new Error(`${doc.file_name ?? 'That file'} is not a PDF.`);
+  const sourceBytes = await download(ctx, doc);
+  const prepared = await prepareJob(sourceBytes);
+  const sourceName = doc.file_name ?? 'source.pdf';
+  const job = addJob({
+    id: newJobId(),
+    userId: ctx.from!.id,
+    chatId: ctx.chat!.id,
+    sourceName,
+    sourceBytes,
+    prepared,
+    createdAt: Date.now(),
+    overrides: {},
+    suggestions: suggestJobNames(prepared, sourceName),
+  });
+  await saveJob(job).catch((e) => console.warn('Could not save job:', e));
+  return job;
+}
+
+/** Download + read a source PDF into a Job. Replies with the error and returns undefined on failure. */
 async function startJob(ctx: Context, doc: Doc): Promise<Job | undefined> {
-  if (!isPdf(doc)) {
-    await ctx.reply('That file is not a PDF.');
-    return undefined;
-  }
   await ctx.sendChatAction('typing').catch(() => {});
   try {
-    const sourceBytes = await download(ctx, doc);
-    const prepared = await prepareJob(sourceBytes);
-    const sourceName = doc.file_name ?? 'source.pdf';
-    const job = addJob({
-      id: newJobId(),
-      userId: ctx.from!.id,
-      chatId: ctx.chat!.id,
-      sourceName,
-      sourceBytes,
-      prepared,
-      createdAt: Date.now(),
-      overrides: {},
-      suggestions: suggestJobNames(prepared, sourceName),
-    });
-    await saveJob(job).catch((e) => console.warn('Could not save job:', e));
-    return job;
+    return await createJob(ctx, doc);
   } catch (e) {
     console.error(e);
     await ctx.reply(`❌ ${errText(e)}`);
@@ -168,10 +173,10 @@ interface Output {
 }
 
 /** Fill the form and draw the preview. */
-async function produce(job: Job, jobName: string): Promise<Output> {
+async function produce(job: Job, jobName: string, withPreview = config.preview): Promise<Output> {
   const t0 = performance.now();
   const res = await renderJob({ prepared: job.prepared, jobName, overrides: job.overrides, flatten: isFlat(job) });
-  const picture = config.preview ? await renderPreview(res.bytes).catch((e) => void console.warn('Preview failed:', e)) : undefined;
+  const picture = withPreview ? await renderPreview(res.bytes).catch((e) => void console.warn('Preview failed:', e)) : undefined;
   return { res, picture: picture ?? undefined, ms: performance.now() - t0 };
 }
 
@@ -301,6 +306,79 @@ async function showLibrary(ctx: Context) {
   );
 }
 
+/* ---------- batch: several PDFs sent together (one album) ---------- */
+
+interface Batch {
+  ctx: Context;
+  docs: Doc[];
+  caption: string;
+  timer?: NodeJS.Timeout;
+}
+const batches = new Map<string, Batch>();
+
+/** Telegram delivers an album as separate messages: collect them for a moment, then run them together. */
+function queueBatch(ctx: Context, groupId: string, doc: Doc, caption: string) {
+  const key = `${ctx.from!.id}:${groupId}`;
+  const b = batches.get(key) ?? { ctx, docs: [], caption: '' };
+  b.docs.push(doc);
+  if (caption) b.caption = caption;
+  clearTimeout(b.timer);
+  b.timer = setTimeout(() => {
+    batches.delete(key);
+    runBatch(b).catch((e) => console.error('Batch failed:', e));
+  }, config.batchWaitMs);
+  batches.set(key, b);
+}
+
+async function runBatch({ ctx, docs, caption }: Batch) {
+  if (docs.length === 1) {
+    const job = await startJob(ctx, docs[0]!);
+    if (!job) return;
+    const name = commandArgs(caption, 'write') ?? (caption.startsWith('/') ? '' : caption);
+    return name ? finish(ctx, job, name) : askName(ctx, job);
+  }
+  const status = await ctx.reply(`📦 ${docs.length} PDFs — filling them all…`);
+  await ctx.sendChatAction('upload_document').catch(() => {});
+  const t0 = performance.now();
+  const used = new Set<string>();
+  const zipFiles: Record<string, Uint8Array> = {};
+  const lines: string[] = [];
+  const done: Job[] = [];
+  for (const doc of docs) {
+    try {
+      const job = await createJob(ctx, doc);
+      let name = job.suggestions[0] ?? job.sourceName.replace(/\.pdf$/i, '');
+      for (let n = 2; used.has(name.toLowerCase()); n++) name = `${job.suggestions[0] ?? 'Job'} (${n})`;
+      used.add(name.toLowerCase());
+      job.jobName = name;
+      const { res } = await produce(job, name, false);
+      zipFiles[res.fileName] = res.bytes;
+      await saveJob(job).catch(() => {});
+      done.push(job);
+      const missing = missingFields(job).length;
+      lines.push(missing ? `🧩 ${esc(name)} — ${missing} missing` : `✅ ${esc(name)}`);
+    } catch (e) {
+      lines.push(`❌ ${esc(doc.file_name ?? 'file')} — ${esc(errText(e))}`);
+    }
+  }
+  await ctx.telegram.deleteMessage(status.chat.id, status.message_id).catch(() => {});
+  if (!done.length) return ctx.reply(`❌ None of the ${docs.length} files could be filled:\n${lines.join('\n')}`, { parse_mode: 'HTML' });
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '-');
+  const zipName = `Jobs ${stamp} (${done.length}).zip`;
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  let text = `📦 <b>${done.length} of ${docs.length} filled</b> — all in ${esc(zipName)}\n\n${lines.join('\n')}\n\n<i>⚡ ${secs} s · tap a job to check, rename or fix it</i>`;
+  if (text.length > 1024) text = `📦 <b>${done.length} of ${docs.length} filled</b> — all in ${esc(zipName)}\n<i>⚡ ${secs} s</i>`;
+  const rows = done.slice(0, 20).map((j) => {
+    const missing = missingFields(j).length;
+    return [Markup.button.callback(`${missing ? '🧩' : '🔍'} ${j.jobName}`.slice(0, 60), `hj:${j.id}`)];
+  });
+  await ctx.replyWithDocument(
+    { source: Buffer.from(zipSync(zipFiles, { level: 0 })), filename: zipName },
+    { caption: text, parse_mode: 'HTML', ...Markup.inlineKeyboard(rows) },
+  );
+  console.log(`Batch: ${done.length}/${docs.length} filled in ${secs} s`);
+}
+
 async function importTemplate(ctx: Context, d: Doc) {
   if (!/\.json$/i.test(d.file_name ?? '') && d.mime_type !== 'application/json') {
     return ctx.reply('Send the template as a .json file (web app: Templates → Export).');
@@ -417,6 +495,9 @@ export function createBot(token = config.token): Telegraf {
     const document = ctx.message.document;
     if (commandArgs(caption, 'template') !== undefined) return importTemplate(ctx, document);
     if (!isPdf(document) && /\.json$/i.test(document.file_name ?? '')) return importTemplate(ctx, document);
+    // several PDFs sent together: one batch
+    const groupId = (ctx.message as any).media_group_id as string | undefined;
+    if (groupId) return queueBatch(ctx, groupId, document, caption);
     const job = await startJob(ctx, document);
     if (!job) return;
     // caption "/write Name" or simply "Name" = the Job Name

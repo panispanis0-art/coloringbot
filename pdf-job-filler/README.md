@@ -106,6 +106,8 @@ Using it:
 - Shortcut: put the Job Name in the **caption** of the PDF (`/write My Job` or just `My Job`).
 - The PDF comes back with a **picture of the filled page 1** (check it without opening anything) and a **result card**: every field with its value (missing ones marked ❌) and buttons
   for a **🔒 flattened / 📝 editable copy** and **🔁 Rename**.
+- **Batch**: select several PDFs and send them together. Each is named from its own data, and you get **one ZIP**
+  with all filled PDFs, a status line per job (✅ complete / 🧩 N missing / ❌ error) and a button per job.
 - **Several templates**: keep as many as you like. For each PDF the bot tries all of them and uses the one
   that finds the most values (it tells you which, e.g. `9/10 found`). **🔄 Other template** switches with one tap.
 - **Nothing expires**: jobs are saved in `bot/data/jobs/` (source PDF + your corrections), so buttons on old

@@ -46,6 +46,8 @@ export const config = {
   titleFromJobName: bool(process.env.TITLE_FROM_JOB_NAME) ?? false,
   /** send a picture of page 1 with the result */
   preview: bool(process.env.PREVIEW) ?? true,
+  /** how long to wait for the rest of an album of PDFs */
+  batchWaitMs: Number(process.env.BATCH_WAIT_MS) || 1500,
   metadata: {
     author: meta('PDF_AUTHOR', 'Alex'),
     creator: meta('PDF_CREATOR'),
